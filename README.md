@@ -91,6 +91,22 @@ zig build lint
 
 The build output will be in `zig-out/bin/sequencer`.
 
+### Docker Build
+
+```bash
+# Build Docker image
+docker build -t native-sequencer .
+
+# Run with Docker
+docker run -p 8545:8545 -p 9090:9090 \
+  -e L1_RPC_URL=http://host.docker.internal:8545 \
+  -e SEQUENCER_KEY=<your-private-key> \
+  native-sequencer
+
+# Or use docker-compose
+docker-compose up -d
+```
+
 ## Running
 
 ### Basic Usage
