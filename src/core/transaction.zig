@@ -3,6 +3,9 @@ const types = @import("types.zig");
 const crypto_hash = @import("../crypto/hash.zig");
 const signature = @import("signature.zig");
 
+// Transaction type constants (EIP-2718)
+pub const ExecuteTxType: u8 = 0x05;
+
 pub const Transaction = struct {
     nonce: u64,
     gas_price: u256,

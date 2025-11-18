@@ -11,6 +11,7 @@ pub const ValidationResult = enum {
     insufficient_balance,
     invalid_gas_price,
     duplicate,
+    invalid_execute_tx,
 };
 
 pub const TransactionValidator = struct {
@@ -56,4 +57,8 @@ pub const TransactionValidator = struct {
 
         return .valid;
     }
+
+    // Note: ExecuteTx transactions are stateless and should be forwarded to L1 geth
+    // We don't do full validation here - L1 geth will validate them when executed
+    // Only minimal validation (signature check for deduplication) is done in acceptExecuteTx
 };

@@ -94,7 +94,7 @@ pub fn main() !void {
     // Start API server
     std.log.info("Starting API server...", .{});
     const api_address = try std.net.Address.parseIp(cfg.api_host, cfg.api_port);
-    var api_server = lib.api.server.JsonRpcServer.init(allocator, api_address, cfg.api_host, cfg.api_port, &ingress_handler, &m);
+    var api_server = lib.api.server.JsonRpcServer.initWithL1Client(allocator, api_address, cfg.api_host, cfg.api_port, &ingress_handler, &m, &l1_client);
 
     // Start sequencing loop in background
     std.log.info("Starting sequencing loop (interval={d}ms)...", .{cfg.batch_interval_ms});

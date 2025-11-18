@@ -112,6 +112,17 @@ pub const Client = struct {
         return core.types.hashFromBytes(hash_bytes);
     }
 
+    /// Forward ExecuteTx transaction to L1 geth
+    /// ExecuteTx transactions are stateless and should be sent directly to L1 geth
+    pub fn forwardExecuteTx(self: *Client, execute_tx: *const core.transaction_execute.ExecuteTx) !core.types.Hash {
+        // Serialize ExecuteTx to raw transaction bytes
+        const raw_tx = try execute_tx.serialize(self.allocator);
+        defer self.allocator.free(raw_tx);
+
+        // Forward to L1 geth via eth_sendRawTransaction
+        return try self.sendTransaction(raw_tx);
+    }
+
     fn sendTransactionConditional(self: *Client, signed_tx: []const u8, options: ConditionalOptions) !core.types.Hash {
         // Send JSON-RPC eth_sendRawTransactionConditional (EIP-7796)
         const tx_hex = try self.bytesToHex(signed_tx);

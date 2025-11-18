@@ -1,6 +1,7 @@
 // Core data structures and types
 pub const types = @import("types.zig");
 pub const transaction = @import("transaction.zig");
+pub const transaction_execute = @import("transaction_execute.zig");
 pub const block = @import("block.zig");
 pub const batch = @import("batch.zig"); // core/batch.zig
 pub const receipt = @import("receipt.zig");
