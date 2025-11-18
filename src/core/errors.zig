@@ -10,30 +10,30 @@ pub const SequencerError = error{
     InvalidGasPrice,
     DuplicateTransaction,
     TransactionTooLarge,
-    
+
     // Mempool errors
     MempoolFull,
     MempoolEntryNotFound,
-    
+
     // Block/Batch errors
     BlockGasLimitExceeded,
     BatchSizeExceeded,
     InvalidBlock,
-    
+
     // L1 errors
     L1ConnectionFailed,
     L1SubmissionFailed,
     L1TransactionReverted,
-    
+
     // State errors
     StateCorruption,
     InvalidStateTransition,
-    
+
     // Network errors
     NetworkError,
     InvalidRequest,
     RateLimitExceeded,
-    
+
     // System errors
     EmergencyHalt,
     ConfigurationError,
@@ -55,4 +55,3 @@ pub fn formatError(err: anyerror) []const u8 {
         else => "Unknown error",
     };
 }
-

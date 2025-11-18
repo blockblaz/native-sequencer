@@ -25,4 +25,3 @@ pub const Batch = struct {
         return list.toOwnedSlice();
     }
 };
-

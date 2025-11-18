@@ -8,9 +8,9 @@ pub const JsonRpcRequest = struct {
     method: []const u8,
     params: ?std.json.Value = null,
     id: ?std.json.Value = null,
-    
+
     pub fn parse(allocator: std.mem.Allocator, json_str: []const u8) !JsonRpcRequest {
-        // Use parseFromSliceLeaky for Zig 0.14 - returns owned value
+        // Use parseFromSliceLeaky for Zig 0.15 - returns owned value
         // We need to handle the parsed value carefully since it owns the strings
         const parsed = try std.json.parseFromSliceLeaky(
             JsonRpcRequest,
@@ -27,7 +27,7 @@ pub const JsonRpcResponse = struct {
     result: ?std.json.Value = null,
     @"error": ?JsonRpcError = null,
     id: ?std.json.Value = null,
-    
+
     pub fn success(allocator: std.mem.Allocator, id: ?std.json.Value, result: std.json.Value) ![]u8 {
         const response = JsonRpcResponse{
             .jsonrpc = "2.0",
@@ -39,7 +39,7 @@ pub const JsonRpcResponse = struct {
         _ = response;
         return try allocator.dupe(u8, "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":null}");
     }
-    
+
     pub fn errorResponse(allocator: std.mem.Allocator, id: ?std.json.Value, code: i32, message: []const u8) ![]u8 {
         const response = JsonRpcResponse{
             .jsonrpc = "2.0",
@@ -70,4 +70,3 @@ pub const ErrorCode = struct {
     pub const InternalError: i32 = -32603;
     pub const ServerError: i32 = -32000;
 };
-

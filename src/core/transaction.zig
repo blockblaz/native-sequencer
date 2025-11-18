@@ -52,4 +52,3 @@ pub const Transaction = struct {
         return self.gas_price;
     }
 };
-

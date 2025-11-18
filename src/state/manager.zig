@@ -114,4 +114,3 @@ pub const StateManager = struct {
         // In production, update state root, receipts root, etc.
     }
 };
-

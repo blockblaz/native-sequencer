@@ -45,7 +45,7 @@ pub const Ingress = struct {
         var results = std.array_list.Managed(validator.ValidationResult).init(self.allocator);
         defer results.deinit();
         errdefer results.deinit();
-        
+
         for (txs) |tx| {
             const result = self.acceptTransaction(tx) catch |err| {
                 _ = err;
@@ -57,4 +57,3 @@ pub const Ingress = struct {
         return results.toOwnedSlice();
     }
 };
-

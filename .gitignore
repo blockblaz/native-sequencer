@@ -4,7 +4,8 @@ zig-out/
 zig-cache/
 
 # Compiled binaries
-sequencer
+/sequencer
+sequencer.exe
 *.o
 *.a
 *.so

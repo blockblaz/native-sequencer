@@ -47,4 +47,3 @@ pub const Builder = struct {
         return self.blocks.items.len >= self.config.batch_size_limit;
     }
 };
-

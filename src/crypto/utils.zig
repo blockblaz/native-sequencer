@@ -51,4 +51,3 @@ fn hexCharToNibble(c: u8) !u8 {
         else => error.InvalidHexCharacter,
     };
 }
-

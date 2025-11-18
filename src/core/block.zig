@@ -27,4 +27,3 @@ pub const Block = struct {
         return types.hashFromBytes(block_hash_bytes);
     }
 };
-

@@ -28,4 +28,3 @@ pub const WriteAheadLog = struct {
         try self.file.sync();
     }
 };
-

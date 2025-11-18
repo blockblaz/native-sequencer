@@ -5,4 +5,3 @@ pub const Signature = struct {
     s: [32]u8,
     v: u8,
 };
-

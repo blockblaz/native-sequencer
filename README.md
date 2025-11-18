@@ -85,8 +85,14 @@ zig build run
 # Run tests
 zig build test
 
-# Run linter
+# Run linter (format check + AST checks)
 zig build lint
+
+# Format code automatically
+zig build fmt
+
+# Run lint-fix (alias for fmt)
+zig build lint-fix
 ```
 
 The build output will be in `zig-out/bin/sequencer`.
@@ -375,6 +381,29 @@ Get the current block number.
 }
 ```
 
+### L1 Client Features
+
+The sequencer includes a full-featured HTTP client for L1 communication:
+
+- **Standard Transaction Submission**: `eth_sendRawTransaction` for submitting batches to L1
+- **Conditional Transaction Submission**: `eth_sendRawTransactionConditional` (EIP-7796) for conditional batch submission with block number constraints
+- **Transaction Receipt Polling**: `eth_getTransactionReceipt` for tracking batch inclusion
+- **Block Number Queries**: `eth_blockNumber` for L1 state synchronization
+- **Automatic Confirmation Waiting**: `waitForInclusion()` method for polling transaction confirmations
+
+#### Conditional Transaction Submission
+
+The sequencer supports EIP-7796 conditional transaction submission, allowing batches to be submitted with preconditions:
+
+```zig
+const options = l1.Client.ConditionalOptions{
+    .block_number_max = 1000000, // Only include if block <= 1000000
+};
+const tx_hash = try l1_client.submitBatchConditional(batch, options);
+```
+
+This feature enables more efficient batch submission by allowing the sequencer to specify maximum block numbers for inclusion, reducing the need for extensive simulations.
+
 ### Metrics
 
 Access metrics at `http://localhost:9090` (or configured port).
@@ -396,6 +425,9 @@ This is an initial implementation. Production use requires:
 - ✅ Basic state management
 - ✅ RLP encoding/decoding (complete implementation with tests)
 - ✅ Docker support
+- ✅ HTTP server implementation (Zig 0.15 networking APIs)
+- ✅ HTTP client for L1 communication (JSON-RPC support)
+- ✅ Conditional transaction submission (EIP-7796 support)
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
 - ⏳ Full transaction execution engine
 - ⏳ RocksDB/LMDB integration for persistence
@@ -404,7 +436,71 @@ This is an initial implementation. Production use requires:
 - ⏳ Proper error handling and retry logic
 - ⏳ Comprehensive testing
 
+## Linting
+
+The repository includes comprehensive linting checks to ensure code quality:
+
+- **Format Check**: Validates code formatting using `zig fmt --check`
+- **AST Checks**: Validates syntax and type correctness using `zig ast-check` for key modules
+- **Format Fix**: Automatically formats code using `zig fmt`
+
+### Linting Commands
+
+```bash
+# Run all linting checks (format + AST)
+# Exit code 1 if formatting issues are found
+zig build lint
+
+# Format code automatically (fixes formatting issues)
+zig build fmt
+
+# Run lint-fix (alias for fmt)
+zig build lint-fix
+```
+
+**Note**: If `zig build lint` fails, run `zig build fmt` to automatically fix formatting issues, then commit the changes.
+
+### CI/CD Integration
+
+A comprehensive GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
+- Push to main/master/develop branches
+- Pull requests targeting main/master/develop branches
+
+The CI pipeline includes:
+
+#### Linting & Testing
+- **Code formatting validation** (`zig fmt --check`)
+- **AST syntax checks** for key modules (`zig ast-check`)
+- **Unit tests** (`zig build test`)
+
+#### Multi-Platform Builds
+- **Linux (x86_64)**: Builds and verifies binary for Linux
+- **macOS (x86_64)**: Builds and verifies binary for Intel Macs
+- **macOS (ARM64)**: Builds and verifies binary for Apple Silicon
+- **Windows (x86_64)**: Builds and verifies binary for Windows
+
+#### Docker Build Validation
+- **Multi-architecture Docker builds**: Tests Docker image builds for both `linux/amd64` and `linux/arm64`
+- **Image verification**: Validates Docker image structure and metadata
+- **Runtime testing**: Verifies that the Docker image can start and contains the expected binary
+
+The workflow will fail if:
+- Code is not properly formatted
+- AST checks reveal syntax or type errors
+- Unit tests fail
+- Build fails on any platform
+- Docker image build or validation fails
+
 ## Technical Details
+
+### Networking Implementation
+
+The sequencer uses Zig 0.15.2's standard library networking APIs:
+
+- **HTTP Server**: Built on `std.net.Server` and `std.net.Stream` for accepting JSON-RPC connections
+- **HTTP Client**: Uses `std.net.tcpConnectToAddress` for L1 RPC communication
+- **Connection Handling**: Thread-based concurrent request handling with proper resource cleanup
+- **RLP Transaction Parsing**: Full RLP decoding support for transaction deserialization
 
 ### Custom U256 Implementation
 

@@ -34,7 +34,7 @@ pub const JsonRpcServer = struct {
     fn handleConnectionThread(server: *JsonRpcServer, conn: http.Connection) void {
         var conn_mut = conn;
         defer conn_mut.close();
-        
+
         var request = conn_mut.readRequest() catch |err| {
             std.log.warn("Failed to read request: {any}", .{err});
             return;
@@ -54,14 +54,9 @@ pub const JsonRpcServer = struct {
 
         const json_response = server.handleJsonRpc(request.body) catch |err| {
             std.log.warn("Failed to handle JSON-RPC: {any}", .{err});
-            const error_response = jsonrpc.JsonRpcResponse.errorResponse(
-                server.allocator,
-                null,
-                jsonrpc.ErrorCode.InternalError,
-                "Internal error"
-            ) catch return;
+            const error_response = jsonrpc.JsonRpcResponse.errorResponse(server.allocator, null, jsonrpc.ErrorCode.InternalError, "Internal error") catch return;
             defer server.allocator.free(error_response);
-            
+
             var http_resp = http.HttpResponse.init(server.allocator);
             defer http_resp.deinit();
             http_resp.body = error_response;
@@ -94,12 +89,7 @@ pub const JsonRpcServer = struct {
         } else if (std.mem.eql(u8, request.method, "eth_blockNumber")) {
             return try self.handleBlockNumber(&request);
         } else {
-            return try jsonrpc.JsonRpcResponse.errorResponse(
-                self.allocator,
-                request.id,
-                jsonrpc.ErrorCode.MethodNotFound,
-                "Method not found"
-            );
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.MethodNotFound, "Method not found");
         }
     }
 
@@ -108,34 +98,19 @@ pub const JsonRpcServer = struct {
 
         // Parse params
         const params = request.params orelse {
-            return try jsonrpc.JsonRpcResponse.errorResponse(
-                self.allocator,
-                request.id,
-                jsonrpc.ErrorCode.InvalidParams,
-                "Missing params"
-            );
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing params");
         };
 
-        // In Zig 0.14, std.json.Value is a union, so we need to use switch
+        // In Zig 0.15, std.json.Value is a union, so we need to use switch
         const params_array = switch (params) {
             .array => |arr| arr,
             else => {
-                return try jsonrpc.JsonRpcResponse.errorResponse(
-                    self.allocator,
-                    request.id,
-                    jsonrpc.ErrorCode.InvalidParams,
-                    "Invalid params - expected array"
-                );
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid params - expected array");
             },
         };
 
         if (params_array.items.len == 0) {
-            return try jsonrpc.JsonRpcResponse.errorResponse(
-                self.allocator,
-                request.id,
-                jsonrpc.ErrorCode.InvalidParams,
-                "Missing transaction data"
-            );
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing transaction data");
         }
 
         // Access the first element and check if it's a string
@@ -143,63 +118,42 @@ pub const JsonRpcServer = struct {
         const tx_hex = switch (first_param) {
             .string => |s| s,
             else => {
-                return try jsonrpc.JsonRpcResponse.errorResponse(
-                    self.allocator,
-                    request.id,
-                    jsonrpc.ErrorCode.InvalidParams,
-                    "Invalid transaction format"
-                );
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction format");
             },
         };
 
         // Decode hex string (remove 0x prefix if present)
         const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
         const hex_data = tx_hex[hex_start..];
-        
+
         var tx_bytes = std.array_list.Managed(u8).init(self.allocator);
         defer tx_bytes.deinit();
-        
+
         var i: usize = 0;
         while (i < hex_data.len) : (i += 2) {
             if (i + 1 >= hex_data.len) break;
-            const byte = try std.fmt.parseInt(u8, hex_data[i..i+2], 16);
+            const byte = try std.fmt.parseInt(u8, hex_data[i .. i + 2], 16);
             try tx_bytes.append(byte);
         }
 
         // Decode RLP transaction
-        // For now, create a simplified transaction
-        // In production, use core.rlp.decodeTransaction
-        const tx = core.transaction.Transaction{
-            .nonce = 0,
-            .gas_price = 1_000_000_000,
-            .gas_limit = 21_000,
-            .to = null,
-            .value = 0,
-            .data = tx_bytes.items,
-            .v = 0,
-            .r = [_]u8{0} ** 32,
-            .s = [_]u8{0} ** 32,
+        const tx_bytes_slice = try tx_bytes.toOwnedSlice();
+        defer self.allocator.free(tx_bytes_slice);
+
+        const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction encoding");
         };
+        defer self.allocator.free(tx.data);
 
         const result = self.ingress_handler.acceptTransaction(tx) catch {
             self.metrics.incrementTransactionsRejected();
             // Handle actual errors (like allocation failures)
-            return try jsonrpc.JsonRpcResponse.errorResponse(
-                self.allocator,
-                request.id,
-                jsonrpc.ErrorCode.ServerError,
-                "Transaction processing failed"
-            );
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction processing failed");
         };
 
         if (result != .valid) {
             self.metrics.incrementTransactionsRejected();
-            return try jsonrpc.JsonRpcResponse.errorResponse(
-                self.allocator,
-                request.id,
-                jsonrpc.ErrorCode.ServerError,
-                "Transaction validation failed"
-            );
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction validation failed");
         }
 
         self.metrics.incrementTransactionsAccepted();

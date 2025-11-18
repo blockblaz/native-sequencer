@@ -12,11 +12,22 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Zig 0.15.2
+# Detect architecture and download appropriate Zig binary
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 ENV ZIG_VERSION=0.15.2
-RUN curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o zig.tar.xz \
-    && tar -xf zig.tar.xz \
-    && mv zig-linux-x86_64-${ZIG_VERSION} /opt/zig \
-    && rm zig.tar.xz
+RUN ARCH_SUFFIX=$(echo ${TARGETPLATFORM} | cut -d'/' -f2) && \
+    if [ "${ARCH_SUFFIX}" = "amd64" ]; then \
+        ZIG_ARCH="x86_64"; \
+    elif [ "${ARCH_SUFFIX}" = "arm64" ]; then \
+        ZIG_ARCH="aarch64"; \
+    else \
+        echo "Unsupported architecture: ${ARCH_SUFFIX}" && exit 1; \
+    fi && \
+    curl -f -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${ZIG_ARCH}-linux-${ZIG_VERSION}.tar.xz" -o zig.tar.xz && \
+    tar -xf zig.tar.xz && \
+    mv zig-${ZIG_ARCH}-linux-${ZIG_VERSION} /opt/zig && \
+    rm zig.tar.xz
 
 # Add Zig to PATH
 ENV PATH="/opt/zig:${PATH}"

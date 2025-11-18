@@ -33,21 +33,24 @@ pub const Config = struct {
     pub fn fromEnv(allocator: std.mem.Allocator) !Config {
         var config = Config{};
 
-        if (std.posix.getenv("API_HOST")) |host| {
-            config.api_host = try allocator.dupe(u8, host);
-        }
-        if (std.posix.getenv("API_PORT")) |port_str| {
+        if (std.process.getEnvVarOwned(allocator, "API_HOST")) |host| {
+            config.api_host = host;
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "API_PORT")) |port_str| {
             config.api_port = try std.fmt.parseInt(u16, port_str, 10);
-        }
-        if (std.posix.getenv("L1_RPC_URL")) |url| {
-            config.l1_rpc_url = try allocator.dupe(u8, url);
-        }
-        if (std.posix.getenv("SEQUENCER_KEY")) |key_hex| {
-            // Parse hex key
-            _ = key_hex;
-        }
+            allocator.free(port_str);
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "L1_RPC_URL")) |url| {
+            config.l1_rpc_url = url;
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "SEQUENCER_KEY")) |key_hex| {
+            // Parse hex key (TODO: implement parsing)
+            allocator.free(key_hex);
+        } else |_| {}
 
         return config;
     }
 };
-
