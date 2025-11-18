@@ -112,6 +112,17 @@ pub const Client = struct {
         return core.types.hashFromBytes(hash_bytes);
     }
 
+    /// Forward ExecuteTx transaction to L1 geth
+    /// ExecuteTx transactions are stateless and should be sent directly to L1 geth
+    pub fn forwardExecuteTx(self: *Client, execute_tx: *const core.transaction_execute.ExecuteTx) !core.types.Hash {
+        // Serialize ExecuteTx to raw transaction bytes
+        const raw_tx = try execute_tx.serialize(self.allocator);
+        defer self.allocator.free(raw_tx);
+
+        // Forward to L1 geth via eth_sendRawTransaction
+        return try self.sendTransaction(raw_tx);
+    }
+
     fn sendTransactionConditional(self: *Client, signed_tx: []const u8, options: ConditionalOptions) !core.types.Hash {
         // Send JSON-RPC eth_sendRawTransactionConditional (EIP-7796)
         const tx_hex = try self.bytesToHex(signed_tx);
@@ -250,7 +261,7 @@ pub const Client = struct {
         defer stream.close();
 
         // Build JSON-RPC request
-        var request_json = std.array_list.Managed(u8).init(self.allocator);
+        var request_json = std.ArrayList(u8).init(self.allocator);
         defer request_json.deinit();
 
         try request_json.writer().print(
@@ -261,7 +272,7 @@ pub const Client = struct {
         defer self.allocator.free(request_body);
 
         // Build HTTP request
-        var http_request = std.array_list.Managed(u8).init(self.allocator);
+        var http_request = std.ArrayList(u8).init(self.allocator);
         defer http_request.deinit();
 
         try http_request.writer().print(
@@ -321,7 +332,7 @@ pub const Client = struct {
         // Simple JSON serialization for params
         switch (value) {
             .array => |arr| {
-                var result = std.array_list.Managed(u8).init(self.allocator);
+                var result = std.ArrayList(u8).init(self.allocator);
                 defer result.deinit();
                 try result.append('[');
                 for (arr.items, 0..) |item, i| {
@@ -334,7 +345,7 @@ pub const Client = struct {
                 return result.toOwnedSlice();
             },
             .object => |obj| {
-                var result = std.array_list.Managed(u8).init(self.allocator);
+                var result = std.ArrayList(u8).init(self.allocator);
                 defer result.deinit();
                 try result.append('{');
                 var first = true;
@@ -359,7 +370,7 @@ pub const Client = struct {
     }
 
     fn bytesToHex(self: *Client, bytes: []const u8) ![]u8 {
-        var result = std.array_list.Managed(u8).init(self.allocator);
+        var result = std.ArrayList(u8).init(self.allocator);
         defer result.deinit();
 
         const hex_digits = "0123456789abcdef";

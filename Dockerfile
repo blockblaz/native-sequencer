@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Zig 0.15.2
+# Install Zig 0.14.1
 # Detect architecture and download appropriate Zig binary
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ENV ZIG_VERSION=0.15.2
+ENV ZIG_VERSION=0.14.1
 RUN ARCH_SUFFIX=$(echo ${TARGETPLATFORM} | cut -d'/' -f2) && \
     if [ "${ARCH_SUFFIX}" = "amd64" ]; then \
         ZIG_ARCH="x86_64"; \
@@ -40,8 +40,13 @@ COPY build.zig build.zig.zon ./
 COPY src ./src
 COPY vendor ./vendor
 
+# Fetch dependencies
+RUN --mount=type=cache,target=/root/.cache/zig \
+    zig build --fetch
+
 # Build the sequencer
-RUN zig build -Doptimize=ReleaseSafe
+RUN --mount=type=cache,target=/root/.cache/zig \
+    zig build -Doptimize=ReleaseSafe
 
 # Stage 2: Runtime stage
 FROM ubuntu:22.04

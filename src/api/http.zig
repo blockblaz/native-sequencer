@@ -7,11 +7,15 @@ pub const HttpServer = struct {
     allocator: std.mem.Allocator,
     address: std.net.Address,
     server: ?std.net.Server = null,
+    host: []const u8,
+    port: u16,
 
-    pub fn init(allocator: std.mem.Allocator, address: std.net.Address) HttpServer {
+    pub fn init(allocator: std.mem.Allocator, address: std.net.Address, host: []const u8, port: u16) HttpServer {
         return .{
             .allocator = allocator,
             .address = address,
+            .host = host,
+            .port = port,
         };
     }
 
@@ -22,7 +26,8 @@ pub const HttpServer = struct {
         });
         self.server = server;
 
-        std.log.info("HTTP server listening on {any}", .{self.address});
+        // Format address for readable logging
+        std.log.info("HTTP server listening on {s}:{d}", .{ self.host, self.port });
     }
 
     pub fn accept(self: *HttpServer) !Connection {
@@ -122,7 +127,7 @@ pub const HttpResponse = struct {
     }
 
     pub fn format(self: *const HttpResponse, allocator: std.mem.Allocator) ![]u8 {
-        var result = std.array_list.Managed(u8).init(allocator);
+        var result = std.ArrayList(u8).init(allocator);
         errdefer result.deinit();
 
         const status_text = switch (self.status_code) {

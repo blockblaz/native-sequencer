@@ -7,7 +7,7 @@ const std = @import("std");
 // ============================================================================
 //
 // PROBLEM:
-// Zig 0.15.2 has a compiler bug in HashMap's AutoContext when using native
+// Zig 0.14.x has a compiler bug in HashMap's AutoContext when using native
 // u256 types as HashMap keys. The error manifests as:
 //   "error: access of union field 'pointer' while field 'int' is active"
 //   at std/mem/Allocator.zig:425:45

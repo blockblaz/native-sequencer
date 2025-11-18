@@ -12,7 +12,7 @@ pub const MEVOrderer = struct {
         // Simplified MEV - in production implement bundle detection, backrunning, etc.
         // For now, just return sorted by priority
         // Use ArrayList to avoid allocator issues with Transaction slices
-        var sorted = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
+        var sorted = std.ArrayList(core.transaction.Transaction).init(self.allocator);
         errdefer sorted.deinit();
         try sorted.appendSlice(txs);
 

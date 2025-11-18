@@ -1,6 +1,10 @@
 # Native Sequencer
 
-A production-grade sequencer built in Zig for L2 rollups that accepts transactions, orders them, forms batches, and posts them to L1.
+**⚠️ EXPERIMENTAL SOFTWARE - USE AT YOUR OWN RISK ⚠️**
+
+This is experimental software and is provided "as is" without warranty of any kind. Use at your own risk. The software may contain bugs, security vulnerabilities, or other issues that could result in loss of funds or data.
+
+A sequencer built in Zig for L2 rollups that accepts transactions, orders them, forms batches, and posts them to L1.
 
 ## Overview
 
@@ -12,7 +16,7 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 - **Excellent C interop** - reuse battle-tested C libraries (RocksDB, libsecp256k1, etc.)
 - **Strong control over memory layout** - enables zero-copy network stacks and deterministic serialization
 - **Modern tooling** - easy cross-compilation for Linux amd64/arm64 containers
-- **Production-ready** - built with Zig 0.15.2 for stability and performance
+- **Built with Zig 0.14.1** for stability and performance
 
 ## Features
 
@@ -70,7 +74,7 @@ The sequencer follows a modular architecture:
 
 ### Prerequisites
 
-- **Zig 0.15.2** or later ([Install Zig](https://ziglang.org/download/))
+- **Zig 0.14.1** ([Install Zig](https://ziglang.org/download/))
 - **C compiler** (for vendored C dependencies)
 
 ### Build Commands
@@ -127,7 +131,7 @@ docker rm sequencer
 
 The Dockerfile uses a multi-stage build:
 
-1. **Builder Stage**: Installs Zig 0.15.2 and builds the sequencer
+1. **Builder Stage**: Installs Zig 0.14.1 and builds the sequencer
 2. **Runtime Stage**: Creates a minimal runtime image with just the binary
 
 #### Runtime Environment Variables
@@ -141,7 +145,7 @@ The container accepts the following environment variables (all have defaults set
 **L1 Configuration**:
 - `L1_RPC_URL`: L1 JSON-RPC endpoint (default: `http://host.docker.internal:8545`)
 - `L1_CHAIN_ID`: L1 chain ID (default: `1`)
-- `SEQUENCER_KEY`: Sequencer private key in hex format (required for production)
+- `SEQUENCER_KEY`: Sequencer private key in hex format
 
 **Sequencer Configuration**:
 - `BATCH_SIZE_LIMIT`: Maximum blocks per batch (default: `1000`)
@@ -232,9 +236,9 @@ docker buildx build --platform linux/amd64 -t native-sequencer:amd64 .
 docker buildx build --platform linux/amd64,linux/arm64 -t native-sequencer:latest --push .
 ```
 
-#### Production Deployment
+#### Deployment Considerations
 
-For production deployments, consider:
+For deployments, consider:
 
 1. **Use a specific tag** instead of `latest`
 2. **Set resource limits**
@@ -417,7 +421,7 @@ Available metrics:
 
 ## Development Status
 
-This is an initial implementation. Production use requires:
+This is an experimental implementation. The following features are implemented or in progress:
 
 - ✅ Core sequencer architecture
 - ✅ Transaction validation and mempool
@@ -425,7 +429,7 @@ This is an initial implementation. Production use requires:
 - ✅ Basic state management
 - ✅ RLP encoding/decoding (complete implementation with tests)
 - ✅ Docker support
-- ✅ HTTP server implementation (Zig 0.15 networking APIs)
+- ✅ HTTP server implementation (Zig 0.14.1 networking APIs)
 - ✅ HTTP client for L1 communication (JSON-RPC support)
 - ✅ Conditional transaction submission (EIP-7796 support)
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
@@ -495,7 +499,7 @@ The workflow will fail if:
 
 ### Networking Implementation
 
-The sequencer uses Zig 0.15.2's standard library networking APIs:
+The sequencer uses Zig 0.14.1's standard library networking APIs:
 
 - **HTTP Server**: Built on `std.net.Server` and `std.net.Stream` for accepting JSON-RPC connections
 - **HTTP Client**: Uses `std.net.tcpConnectToAddress` for L1 RPC communication
@@ -504,7 +508,7 @@ The sequencer uses Zig 0.15.2's standard library networking APIs:
 
 ### Custom U256 Implementation
 
-Due to a compiler bug in Zig 0.15.2's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
+Due to a compiler bug in Zig 0.14.x's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
 - Uses two `u128` fields to represent 256-bit values
 - Provides conversion functions to/from native `u256` and byte arrays
 - Includes custom hash and equality functions for HashMap compatibility
@@ -514,11 +518,25 @@ See `src/core/types.zig` for implementation details and rationale.
 
 ## Known Issues & Workarounds
 
-### Zig 0.15.2 HashMap Allocator Bug (RESOLVED)
+### Linux Build Requirements
+
+**glibc Version**: The Linux build requires glibc 2.38 or later due to RocksDB dependencies that use ISO C23 compatibility symbols (`__isoc23_*`). When building for Linux, specify the glibc version:
+
+```bash
+zig build -Dtarget=x86_64-linux-gnu.2.38
+```
+
+**CI Compatibility**: GitHub Actions `ubuntu-latest` runners use Ubuntu 22.04 (glibc 2.35), which is insufficient. The CI workflow specifies glibc 2.38 in the build target to ensure compatibility. For local builds on older Linux distributions, you may need to:
+
+1. Use a newer Linux distribution (Ubuntu 24.04+ or equivalent)
+2. Build in a container with glibc 2.38+
+3. Use the Docker build which includes the correct glibc version
+
+### Zig 0.14.x HashMap Allocator Bug (RESOLVED)
 
 **Status**: ✅ **RESOLVED** - Custom U256 implementation workaround implemented
 
-This project encountered a compiler bug in Zig 0.15.2 related to HashMap initialization with native `u256` types as keys. The error manifests as:
+This project encountered a compiler bug in Zig 0.14.x related to HashMap initialization with native `u256` types as keys. The error manifests as:
 ```
 error: access of union field 'pointer' while field 'int' is active
 at std/mem/Allocator.zig:425:45
@@ -541,11 +559,8 @@ See `src/core/types.zig` for detailed comments explaining the implementation.
 
 ### Zig 0.14.x Allocator Bug (Historical)
 
-This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). See **[ZIG_0.14_ALLOCATOR_ERROR.md](ZIG_0.14_ALLOCATOR_ERROR.md)** for detailed explanation and workarounds attempted.
+This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). The issue was resolved by using a custom `U256` implementation instead of native `u256` types.
 
-### Upgrading to Zig 0.15.2
-
-This project has been successfully upgraded to Zig 0.15.2. See **[ZIG_0.15_UPGRADE.md](ZIG_0.15_UPGRADE.md)** for detailed information about the upgrade process, encountered errors, and solutions.
 
 ## License
 

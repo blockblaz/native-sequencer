@@ -2,6 +2,7 @@ const std = @import("std");
 const core = @import("../core/root.zig");
 const validation = @import("../validation/root.zig");
 const metrics = @import("../metrics/root.zig");
+const l1 = @import("../l1/root.zig");
 const http = @import("http.zig");
 const jsonrpc = @import("jsonrpc.zig");
 
@@ -10,13 +11,25 @@ pub const JsonRpcServer = struct {
     ingress_handler: *validation.ingress.Ingress,
     metrics: *metrics.Metrics,
     http_server: http.HttpServer,
+    l1_client: ?*l1.Client = null,
 
-    pub fn init(allocator: std.mem.Allocator, addr: std.net.Address, ing: *validation.ingress.Ingress, m: *metrics.Metrics) JsonRpcServer {
+    pub fn init(allocator: std.mem.Allocator, addr: std.net.Address, host: []const u8, port: u16, ing: *validation.ingress.Ingress, m: *metrics.Metrics) JsonRpcServer {
         return .{
             .allocator = allocator,
             .ingress_handler = ing,
             .metrics = m,
-            .http_server = http.HttpServer.init(allocator, addr),
+            .http_server = http.HttpServer.init(allocator, addr, host, port),
+            .l1_client = null,
+        };
+    }
+
+    pub fn initWithL1Client(allocator: std.mem.Allocator, addr: std.net.Address, host: []const u8, port: u16, ing: *validation.ingress.Ingress, m: *metrics.Metrics, l1_cli: *l1.Client) JsonRpcServer {
+        return .{
+            .allocator = allocator,
+            .ingress_handler = ing,
+            .metrics = m,
+            .http_server = http.HttpServer.init(allocator, addr, host, port),
+            .l1_client = l1_cli,
         };
     }
 
@@ -36,7 +49,7 @@ pub const JsonRpcServer = struct {
         defer conn_mut.close();
 
         var request = conn_mut.readRequest() catch |err| {
-            std.log.warn("Failed to read request: {any}", .{err});
+            std.log.warn("Failed to read HTTP request: {any}", .{err});
             return;
         };
         defer request.deinit();
@@ -53,7 +66,7 @@ pub const JsonRpcServer = struct {
         }
 
         const json_response = server.handleJsonRpc(request.body) catch |err| {
-            std.log.warn("Failed to handle JSON-RPC: {any}", .{err});
+            std.log.warn("Failed to handle JSON-RPC request (method={s}): {any}", .{ request.method, err });
             const error_response = jsonrpc.JsonRpcResponse.errorResponse(server.allocator, null, jsonrpc.ErrorCode.InternalError, "Internal error") catch return;
             defer server.allocator.free(error_response);
 
@@ -126,7 +139,7 @@ pub const JsonRpcServer = struct {
         const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
         const hex_data = tx_hex[hex_start..];
 
-        var tx_bytes = std.array_list.Managed(u8).init(self.allocator);
+        var tx_bytes = std.ArrayList(u8).init(self.allocator);
         defer tx_bytes.deinit();
 
         var i: usize = 0;
@@ -136,46 +149,104 @@ pub const JsonRpcServer = struct {
             try tx_bytes.append(byte);
         }
 
-        // Decode RLP transaction
+        // Decode transaction based on type
         const tx_bytes_slice = try tx_bytes.toOwnedSlice();
         defer self.allocator.free(tx_bytes_slice);
 
-        const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
-            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction encoding");
-        };
-        defer self.allocator.free(tx.data);
+        // Check transaction type (EIP-2718)
+        if (tx_bytes_slice.len > 0 and tx_bytes_slice[0] == core.transaction.ExecuteTxType) {
+            // ExecuteTx transaction - these are stateless and should be forwarded to L1 geth
+            var execute_tx = core.transaction_execute.ExecuteTx.fromRaw(self.allocator, tx_bytes_slice) catch {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid ExecuteTx encoding");
+            };
+            defer execute_tx.deinit(self.allocator);
 
-        const result = self.ingress_handler.acceptTransaction(tx) catch {
-            self.metrics.incrementTransactionsRejected();
-            // Handle actual errors (like allocation failures)
-            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction processing failed");
-        };
+            // Minimal validation (signature check for deduplication)
+            const result = self.ingress_handler.acceptExecuteTx(&execute_tx) catch {
+                self.metrics.incrementTransactionsRejected();
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "ExecuteTx processing failed");
+            };
 
-        if (result != .valid) {
-            self.metrics.incrementTransactionsRejected();
-            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction validation failed");
+            if (result != .valid) {
+                self.metrics.incrementTransactionsRejected();
+                const error_msg = switch (result) {
+                    .invalid_signature => "Invalid ExecuteTx signature",
+                    .duplicate => "ExecuteTx already seen",
+                    else => "ExecuteTx validation failed",
+                };
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, error_msg);
+            }
+
+            self.metrics.incrementTransactionsAccepted();
+
+            // Forward ExecuteTx to L1 geth via eth_sendRawTransaction
+            const tx_hash = if (self.l1_client) |l1_cli| blk: {
+                // Forward to L1 geth
+                const forwarded_hash = l1_cli.forwardExecuteTx(&execute_tx) catch |err| {
+                    std.log.err("Failed to forward ExecuteTx to L1 geth: {any}", .{err});
+                    self.metrics.incrementTransactionsRejected();
+                    return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Failed to forward ExecuteTx to L1");
+                };
+                break :blk forwarded_hash;
+            } else blk: {
+                // L1 client not available, just return the transaction hash
+                std.log.warn("L1 client not available, ExecuteTx not forwarded", .{});
+                break :blk try execute_tx.hash(self.allocator);
+            };
+            const hash_bytes = core.types.hashToBytes(tx_hash);
+            var hex_buf: [66]u8 = undefined; // 0x + 64 hex chars
+            hex_buf[0] = '0';
+            hex_buf[1] = 'x';
+            var j: usize = 0;
+            while (j < 32) : (j += 1) {
+                const hex_digits = "0123456789abcdef";
+                hex_buf[2 + j * 2] = hex_digits[hash_bytes[j] >> 4];
+                hex_buf[2 + j * 2 + 1] = hex_digits[hash_bytes[j] & 0xf];
+            }
+            const hash_hex = try std.fmt.allocPrint(self.allocator, "{s}", .{&hex_buf});
+            defer self.allocator.free(hash_hex);
+
+            const result_value = std.json.Value{ .string = hash_hex };
+            return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
+        } else {
+            // Legacy transaction
+            const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction encoding");
+            };
+            defer self.allocator.free(tx.data);
+
+            const result = self.ingress_handler.acceptTransaction(tx) catch {
+                self.metrics.incrementTransactionsRejected();
+                // Handle actual errors (like allocation failures)
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction processing failed");
+            };
+
+            if (result != .valid) {
+                self.metrics.incrementTransactionsRejected();
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction validation failed");
+            }
+
+            self.metrics.incrementTransactionsAccepted();
+
+            const tx_hash = try tx.hash(self.allocator);
+
+            // Format hash as hex string
+            const hash_bytes = core.types.hashToBytes(tx_hash);
+            var hex_buf: [66]u8 = undefined; // 0x + 64 hex chars
+            hex_buf[0] = '0';
+            hex_buf[1] = 'x';
+            var j: usize = 0;
+            while (j < 32) : (j += 1) {
+                const hex_digits = "0123456789abcdef";
+                hex_buf[2 + j * 2] = hex_digits[hash_bytes[j] >> 4];
+                hex_buf[2 + j * 2 + 1] = hex_digits[hash_bytes[j] & 0xf];
+            }
+            const hash_hex = try std.fmt.allocPrint(self.allocator, "{s}", .{&hex_buf});
+            defer self.allocator.free(hash_hex);
+
+            const result_value = std.json.Value{ .string = hash_hex };
+            return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
         }
-
-        self.metrics.incrementTransactionsAccepted();
-
-        const tx_hash = try tx.hash(self.allocator);
-
-        // Format hash as hex string
-        const hash_bytes = core.types.hashToBytes(tx_hash);
-        var hex_buf: [66]u8 = undefined; // 0x + 64 hex chars
-        hex_buf[0] = '0';
-        hex_buf[1] = 'x';
-        var j: usize = 0;
-        while (j < 32) : (j += 1) {
-            const hex_digits = "0123456789abcdef";
-            hex_buf[2 + j * 2] = hex_digits[hash_bytes[j] >> 4];
-            hex_buf[2 + j * 2 + 1] = hex_digits[hash_bytes[j] & 0xf];
-        }
-        const hash_hex = try std.fmt.allocPrint(self.allocator, "{s}", .{&hex_buf});
-        defer self.allocator.free(hash_hex);
-
-        const result_value = std.json.Value{ .string = hash_hex };
-        return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
     }
 
     fn handleGetTransactionReceipt(self: *JsonRpcServer, request: *const jsonrpc.JsonRpcRequest) ![]u8 {
