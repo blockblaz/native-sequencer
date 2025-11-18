@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     _ = b.standardOptimizeOption(.{}); // Available for future use
-    
+
     // Note: For Linux builds, specify glibc 2.38+ in the target (e.g., x86_64-linux-gnu.2.38)
     // This is required for RocksDB compatibility (uses __isoc23_* symbols from glibc 2.38+)
 
