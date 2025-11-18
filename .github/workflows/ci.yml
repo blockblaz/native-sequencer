@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main, master, develop ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
+    branches: [ main, master ]
 
 jobs:
   lint:
@@ -120,9 +121,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        include:
+          - platform: linux/amd64
+            tag: amd64
+          - platform: linux/arm64
+            tag: arm64
     
     steps:
       - name: Checkout code
@@ -137,7 +140,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
-          tags: native-sequencer:test-${{ matrix.platform }}
+          tags: native-sequencer:test-${{ matrix.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: ${{ matrix.platform }}
@@ -145,13 +148,13 @@ jobs:
       
       - name: Verify Docker image
         run: |
-          docker images native-sequencer:test-${{ matrix.platform }}
-          docker inspect native-sequencer:test-${{ matrix.platform }}
+          docker images native-sequencer:test-${{ matrix.tag }}
+          docker inspect native-sequencer:test-${{ matrix.tag }}
       
       - name: Test Docker image
         run: |
           # Test that the image can start (it will exit with error due to missing config, but that's expected)
-          docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.platform }} || true
+          docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.tag }} || true
           # Verify the binary exists and is executable
-          docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.platform }} ls -la /app/sequencer || exit 1
+          docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.tag }} ls -la /app/sequencer || exit 1
 
