@@ -5,6 +5,7 @@ const batch = @import("../batch/root.zig");
 const state = @import("../state/root.zig");
 const config = @import("../config/root.zig");
 const mev = @import("mev.zig");
+const execution = @import("execution.zig");
 
 pub const Sequencer = struct {
     allocator: std.mem.Allocator,
@@ -16,6 +17,8 @@ pub const Sequencer = struct {
     current_block_number: u64 = 0,
     parent_hash: core.types.Hash = core.types.hashFromBytes([_]u8{0} ** 32),
 
+    execution_engine: execution.ExecutionEngine,
+
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config, mp: *mempool.Mempool, sm: *state.StateManager, bb: *batch.Builder) Sequencer {
         return .{
             .allocator = allocator,
@@ -24,6 +27,7 @@ pub const Sequencer = struct {
             .state_manager = sm,
             .batch_builder = bb,
             .mev_orderer = mev.MEVOrderer.init(allocator),
+            .execution_engine = execution.ExecutionEngine.init(allocator, sm),
         };
     }
 
@@ -42,19 +46,34 @@ pub const Sequencer = struct {
         defer valid_txs.deinit();
 
         for (mev_txs) |tx| {
-            // Light simulation check
-            const expected_nonce = try self.state_manager.getNonce(try tx.sender());
-            if (tx.nonce != expected_nonce) continue;
+            // Check if transaction fits in block gas limit
+            const estimated_gas = tx.gas_limit;
+            if (gas_used + estimated_gas > self.config.block_gas_limit) break;
 
-            if (gas_used + tx.gas_limit > self.config.block_gas_limit) break;
+            // Execute transaction
+            const exec_result = self.execution_engine.executeTransaction(tx) catch |err| {
+                std.log.warn("Transaction execution failed: {any}", .{err});
+                continue;
+            };
 
-            // Apply transaction (simplified - in production run full execution)
-            _ = try self.state_manager.applyTransaction(tx, tx.gas_limit);
-            gas_used += tx.gas_limit;
+            // Skip failed transactions
+            if (!exec_result.success) {
+                std.log.warn("Transaction execution failed: gas_used={d}", .{exec_result.gas_used});
+                continue;
+            }
+
+            // Check if execution fits in block gas limit
+            if (gas_used + exec_result.gas_used > self.config.block_gas_limit) break;
+
+            // Apply state changes (execution engine already updated state)
+            // Create receipt
+            const tx_hash = try tx.hash(self.allocator);
+            _ = try self.state_manager.applyTransaction(tx, exec_result.gas_used);
+
+            gas_used += exec_result.gas_used;
             try valid_txs.append(tx);
 
             // Remove from mempool
-            const tx_hash = try tx.hash(self.allocator);
             // tx_hash is U256 struct (not allocated), no need to free
             _ = try self.mempool.remove(tx_hash);
         }

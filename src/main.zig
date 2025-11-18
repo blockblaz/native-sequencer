@@ -46,8 +46,10 @@ pub fn main() !void {
     var sequencing_thread = try std.Thread.spawn(.{}, sequencingLoop, .{ &seq, &batch_builder, &l1_client, &m, &cfg });
     sequencing_thread.detach();
 
-    // Start metrics server (simplified)
-    var metrics_thread = try std.Thread.spawn(.{}, metricsLoop, .{ &m, cfg.metrics_port });
+    // Start metrics server
+    const metrics_address = try std.net.Address.parseIp("0.0.0.0", cfg.metrics_port);
+    var metrics_server = lib.metrics.server.MetricsServer.init(allocator, metrics_address, &m);
+    var metrics_thread = try std.Thread.spawn(.{}, metricsServerLoop, .{&metrics_server});
     metrics_thread.detach();
 
     // Start API server (blocking)
@@ -91,14 +93,8 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
     }
 }
 
-fn metricsLoop(m: *lib.metrics.Metrics, port: u16) void {
-    // Simplified metrics server - in production use proper async networking
-    std.log.info("Metrics server would listen on port {d}", .{port});
-    std.log.warn("Metrics server implementation incomplete - networking API needs proper Zig 0.15 implementation", .{});
-    // TODO: Implement proper metrics server using Zig 0.15 networking APIs
-    // For now, just sleep to keep thread alive
-    while (true) {
-        std.Thread.sleep(1 * std.time.ns_per_s);
-        _ = m;
-    }
+fn metricsServerLoop(server: *lib.metrics.server.MetricsServer) void {
+    server.start() catch |err| {
+        std.log.err("Metrics server error: {any}", .{err});
+    };
 }

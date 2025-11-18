@@ -1,6 +1,10 @@
 # Native Sequencer
 
-A production-grade sequencer built in Zig for L2 rollups that accepts transactions, orders them, forms batches, and posts them to L1.
+**⚠️ EXPERIMENTAL SOFTWARE - USE AT YOUR OWN RISK ⚠️**
+
+This is experimental software and is provided "as is" without warranty of any kind. Use at your own risk. The software may contain bugs, security vulnerabilities, or other issues that could result in loss of funds or data.
+
+A sequencer built in Zig for L2 rollups that accepts transactions, orders them, forms batches, and posts them to L1.
 
 ## Overview
 
@@ -12,7 +16,7 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 - **Excellent C interop** - reuse battle-tested C libraries (RocksDB, libsecp256k1, etc.)
 - **Strong control over memory layout** - enables zero-copy network stacks and deterministic serialization
 - **Modern tooling** - easy cross-compilation for Linux amd64/arm64 containers
-- **Production-ready** - built with Zig 0.15.2 for stability and performance
+- **Built with Zig 0.15.2** for stability and performance
 
 ## Features
 
@@ -141,7 +145,7 @@ The container accepts the following environment variables (all have defaults set
 **L1 Configuration**:
 - `L1_RPC_URL`: L1 JSON-RPC endpoint (default: `http://host.docker.internal:8545`)
 - `L1_CHAIN_ID`: L1 chain ID (default: `1`)
-- `SEQUENCER_KEY`: Sequencer private key in hex format (required for production)
+- `SEQUENCER_KEY`: Sequencer private key in hex format
 
 **Sequencer Configuration**:
 - `BATCH_SIZE_LIMIT`: Maximum blocks per batch (default: `1000`)
@@ -232,9 +236,9 @@ docker buildx build --platform linux/amd64 -t native-sequencer:amd64 .
 docker buildx build --platform linux/amd64,linux/arm64 -t native-sequencer:latest --push .
 ```
 
-#### Production Deployment
+#### Deployment Considerations
 
-For production deployments, consider:
+For deployments, consider:
 
 1. **Use a specific tag** instead of `latest`
 2. **Set resource limits**
@@ -417,7 +421,7 @@ Available metrics:
 
 ## Development Status
 
-This is an initial implementation. Production use requires:
+This is an experimental implementation. The following features are implemented or in progress:
 
 - ✅ Core sequencer architecture
 - ✅ Transaction validation and mempool
