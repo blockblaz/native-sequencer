@@ -32,4 +32,3 @@ pub fn sign(data: []const u8, private_key: [32]u8) types.Signature {
         .v = 0,
     };
 }
-

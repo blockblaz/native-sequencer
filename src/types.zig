@@ -154,4 +154,3 @@ pub const MempoolEntry = struct {
         return .eq;
     }
 };
-

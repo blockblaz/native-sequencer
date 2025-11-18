@@ -8,4 +8,3 @@ pub const signature = @import("signature.zig");
 pub const mempool_entry = @import("mempool_entry.zig");
 pub const errors = @import("errors.zig");
 pub const rlp = @import("rlp.zig");
-

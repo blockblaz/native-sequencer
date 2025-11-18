@@ -57,4 +57,3 @@ pub const TransactionValidator = struct {
         return .valid;
     }
 };
-

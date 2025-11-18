@@ -26,4 +26,3 @@ pub const MEVOrderer = struct {
         return sorted.toOwnedSlice();
     }
 };
-
