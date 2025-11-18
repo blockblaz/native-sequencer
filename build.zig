@@ -66,7 +66,10 @@ pub fn build(b: *std.Build) void {
         lib.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         lib.linkLibCpp(); // RocksDB requires C++ standard library
         lib.linkSystemLibrary("pthread"); // Required for pthread functions
-        lib.linkSystemLibrary("rt"); // Required for gettid on Linux
+        // librt is Linux-specific (gettid, etc.) - not needed on macOS
+        if (target.result.os.tag == .linux) {
+            lib.linkSystemLibrary("rt");
+        }
     }
     lib.linkLibC();
     b.installArtifact(lib);
@@ -91,7 +94,10 @@ pub fn build(b: *std.Build) void {
         exe.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         exe.linkLibCpp(); // RocksDB requires C++ standard library
         exe.linkSystemLibrary("pthread"); // Required for pthread functions
-        exe.linkSystemLibrary("rt"); // Required for gettid on Linux
+        // librt is Linux-specific (gettid, etc.) - not needed on macOS
+        if (target.result.os.tag == .linux) {
+            exe.linkSystemLibrary("rt");
+        }
     }
     exe.linkLibC();
 
@@ -125,7 +131,10 @@ pub fn build(b: *std.Build) void {
         unit_tests.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         unit_tests.linkLibCpp(); // RocksDB requires C++ standard library
         unit_tests.linkSystemLibrary("pthread"); // Required for pthread functions
-        unit_tests.linkSystemLibrary("rt"); // Required for gettid on Linux
+        // librt is Linux-specific (gettid, etc.) - not needed on macOS
+        if (target.result.os.tag == .linux) {
+            unit_tests.linkSystemLibrary("rt");
+        }
     }
     unit_tests.linkLibC();
     const run_unit_tests = b.addRunArtifact(unit_tests);
