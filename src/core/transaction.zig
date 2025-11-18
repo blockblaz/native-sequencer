@@ -38,10 +38,9 @@ pub const Transaction = struct {
         }
     }
 
-    pub fn fromRaw(raw: []const u8) !Transaction {
-        // Simplified parsing - in production use proper RLP decoding
-        _ = raw;
-        return error.NotImplemented;
+    pub fn fromRaw(allocator: std.mem.Allocator, raw: []const u8) !Transaction {
+        const rlp_module = @import("rlp.zig");
+        return try rlp_module.decodeTransaction(allocator, raw);
     }
 
     pub fn sender(self: *const Transaction) !types.Address {

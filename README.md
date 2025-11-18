@@ -91,6 +91,181 @@ zig build lint
 
 The build output will be in `zig-out/bin/sequencer`.
 
+### Docker Build
+
+#### Quick Start
+
+```bash
+# Build Docker image
+docker build -t native-sequencer .
+
+# Run with Docker
+docker run -d \
+  --name sequencer \
+  -p 8545:8545 \
+  -p 9090:9090 \
+  -v sequencer-data:/app/data \
+  -e L1_RPC_URL=http://host.docker.internal:8545 \
+  -e SEQUENCER_KEY=<your-private-key> \
+  native-sequencer
+
+# View logs
+docker logs -f sequencer
+
+# Stop the sequencer
+docker stop sequencer
+docker rm sequencer
+```
+
+#### Dockerfile Details
+
+The Dockerfile uses a multi-stage build:
+
+1. **Builder Stage**: Installs Zig 0.15.2 and builds the sequencer
+2. **Runtime Stage**: Creates a minimal runtime image with just the binary
+
+#### Runtime Environment Variables
+
+The container accepts the following environment variables (all have defaults set in the Dockerfile):
+
+**API Configuration**:
+- `API_HOST`: API server host (default: `0.0.0.0`)
+- `API_PORT`: API server port (default: `8545`)
+
+**L1 Configuration**:
+- `L1_RPC_URL`: L1 JSON-RPC endpoint (default: `http://host.docker.internal:8545`)
+- `L1_CHAIN_ID`: L1 chain ID (default: `1`)
+- `SEQUENCER_KEY`: Sequencer private key in hex format (required for production)
+
+**Sequencer Configuration**:
+- `BATCH_SIZE_LIMIT`: Maximum blocks per batch (default: `1000`)
+- `BLOCK_GAS_LIMIT`: Gas limit per block (default: `30000000`)
+- `BATCH_INTERVAL_MS`: Batch interval in milliseconds (default: `2000`)
+
+**Mempool Configuration**:
+- `MEMPOOL_MAX_SIZE`: Maximum mempool size (default: `100000`)
+- `MEMPOOL_WAL_PATH`: Write-ahead log path (default: `/app/data/mempool.wal`)
+
+**State Configuration**:
+- `STATE_DB_PATH`: State database path (default: `/app/data/state.db`)
+
+**Observability**:
+- `METRICS_PORT`: Metrics server port (default: `9090`)
+- `ENABLE_TRACING`: Enable tracing (default: `false`)
+
+**Operator Controls**:
+- `EMERGENCY_HALT`: Emergency halt flag (default: `false`)
+- `RATE_LIMIT_PER_SECOND`: Rate limit per second (default: `1000`)
+
+#### Ports
+
+The container exposes two ports:
+- **8545**: JSON-RPC API endpoint
+- **9090**: Metrics endpoint
+
+#### Volumes
+
+The container uses a named volume `sequencer-data` to persist:
+- Mempool write-ahead log (`mempool.wal`)
+- State database (`state.db`)
+
+To use a host directory instead:
+```bash
+docker run -v /path/to/data:/app/data ...
+```
+
+#### Security
+
+- The container runs as a non-root user (`sequencer`, UID 1000)
+- Only necessary runtime dependencies are included
+- Source code is not included in the final image
+
+#### Troubleshooting
+
+**Container won't start**:
+```bash
+docker logs sequencer
+```
+
+**Port already in use**:
+Change the port mapping:
+```bash
+docker run -p 18545:8545 -p 19090:9090 ...
+```
+
+**L1 connection issues**:
+- On Mac/Windows, use `host.docker.internal` to access the host:
+  ```bash
+  -e L1_RPC_URL=http://host.docker.internal:8545
+  ```
+- On Linux, you may need to use `--network host`:
+  ```bash
+  docker run --network host ...
+  ```
+
+**Permission issues**:
+Ensure the data directory has correct permissions:
+```bash
+sudo chown -R 1000:1000 /path/to/data
+```
+
+#### Building for Different Architectures
+
+**Build for ARM64** (Apple Silicon, Raspberry Pi):
+```bash
+docker buildx build --platform linux/arm64 -t native-sequencer:arm64 .
+```
+
+**Build for AMD64**:
+```bash
+docker buildx build --platform linux/amd64 -t native-sequencer:amd64 .
+```
+
+**Build multi-architecture image**:
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t native-sequencer:latest --push .
+```
+
+#### Production Deployment
+
+For production deployments, consider:
+
+1. **Use a specific tag** instead of `latest`
+2. **Set resource limits**
+3. **Use secrets** for sensitive data like `SEQUENCER_KEY`
+4. **Enable health checks** (currently placeholder)
+5. **Set up log aggregation**
+6. **Configure monitoring** for metrics endpoint
+
+**Example: Docker with systemd service**:
+```bash
+# Create systemd service file
+cat > /etc/systemd/system/sequencer.service <<EOF
+[Unit]
+Description=Native Sequencer
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+ExecStart=/usr/bin/docker run --rm --name sequencer \
+  -p 8545:8545 -p 9090:9090 \
+  -v sequencer-data:/app/data \
+  -e L1_RPC_URL=\${L1_RPC_URL} \
+  -e SEQUENCER_KEY=\${SEQUENCER_KEY} \
+  native-sequencer:v0.1.0
+ExecStop=/usr/bin/docker stop sequencer
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start service
+systemctl enable sequencer
+systemctl start sequencer
+```
+
 ## Running
 
 ### Basic Usage
@@ -219,7 +394,8 @@ This is an initial implementation. Production use requires:
 - ✅ Transaction validation and mempool
 - ✅ Batch formation and L1 submission
 - ✅ Basic state management
-- ⏳ Proper RLP encoding/decoding (simplified implementation)
+- ✅ RLP encoding/decoding (complete implementation with tests)
+- ✅ Docker support
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
 - ⏳ Full transaction execution engine
 - ⏳ RocksDB/LMDB integration for persistence
