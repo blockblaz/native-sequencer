@@ -36,7 +36,7 @@ pub const JsonRpcServer = struct {
         defer conn_mut.close();
         
         var request = conn_mut.readRequest() catch |err| {
-            std.log.warn("Failed to read request: {}", .{err});
+            std.log.warn("Failed to read request: {any}", .{err});
             return;
         };
         defer request.deinit();
@@ -53,7 +53,7 @@ pub const JsonRpcServer = struct {
         }
 
         const json_response = server.handleJsonRpc(request.body) catch |err| {
-            std.log.warn("Failed to handle JSON-RPC: {}", .{err});
+            std.log.warn("Failed to handle JSON-RPC: {any}", .{err});
             const error_response = jsonrpc.JsonRpcResponse.errorResponse(
                 server.allocator,
                 null,
@@ -156,7 +156,7 @@ pub const JsonRpcServer = struct {
         const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
         const hex_data = tx_hex[hex_start..];
         
-        var tx_bytes = std.ArrayList(u8).init(self.allocator);
+        var tx_bytes = std.array_list.Managed(u8).init(self.allocator);
         defer tx_bytes.deinit();
         
         var i: usize = 0;
@@ -205,9 +205,19 @@ pub const JsonRpcServer = struct {
         self.metrics.incrementTransactionsAccepted();
 
         const tx_hash = try tx.hash(self.allocator);
-        defer self.allocator.free(tx_hash);
 
-        const hash_hex = try std.fmt.allocPrint(self.allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&tx_hash)});
+        // Format hash as hex string
+        const hash_bytes = core.types.hashToBytes(tx_hash);
+        var hex_buf: [66]u8 = undefined; // 0x + 64 hex chars
+        hex_buf[0] = '0';
+        hex_buf[1] = 'x';
+        var j: usize = 0;
+        while (j < 32) : (j += 1) {
+            const hex_digits = "0123456789abcdef";
+            hex_buf[2 + j * 2] = hex_digits[hash_bytes[j] >> 4];
+            hex_buf[2 + j * 2 + 1] = hex_digits[hash_bytes[j] & 0xf];
+        }
+        const hash_hex = try std.fmt.allocPrint(self.allocator, "{s}", .{&hex_buf});
         defer self.allocator.free(hash_hex);
 
         const result_value = std.json.Value{ .string = hash_hex };

@@ -1,8 +1,4 @@
 // Root module exports - organized by domain
-// zigeth is added as an import to this module in build.zig
-// We re-export it here so submodules can access it through this root
-pub const zigeth = @import("zigeth");
-
 pub const core = @import("core/root.zig");
 pub const crypto = @import("crypto/root.zig");
 pub const validation = @import("validation/root.zig");

@@ -25,6 +25,26 @@ fn compareQueueEntry(_: void, a: QueueEntry, b: QueueEntry) std.math.Order {
     return .eq;
 }
 
+// Custom hash context for U256 struct (two u128 fields)
+// This avoids the allocator bug with native u256
+const HashContext = struct {
+    pub fn hash(_: @This(), key: core.types.Hash) u64 {
+        return key.hash();
+    }
+    pub fn eql(_: @This(), a: core.types.Hash, b: core.types.Hash) bool {
+        return a.eql(b);
+    }
+};
+
+const AddressContext = struct {
+    pub fn hash(_: @This(), key: core.types.Address) u64 {
+        return key.hash();
+    }
+    pub fn eql(_: @This(), a: core.types.Address, b: core.types.Address) bool {
+        return a.eql(b);
+    }
+};
+
 // Custom transaction storage that avoids allocating arrays
 // Uses length-prefixed storage: each transaction is stored as [4-byte length][data]
 // This avoids needing a separate offsets array
@@ -45,7 +65,7 @@ const TransactionStorage = struct {
         const buffer_size = max_size * (1024 + 4);
         const buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(buffer);
-        
+
         return TransactionStorage{
             .allocator = allocator,
             .buffer = buffer,
@@ -64,28 +84,28 @@ const TransactionStorage = struct {
         if (self.count >= self.max_count) {
             return error.StorageFull;
         }
-        
+
         // Serialize transaction
         const tx_bytes = try tx.serialize(self.allocator);
         defer self.allocator.free(tx_bytes);
-        
+
         // Check if we have space in buffer (4 bytes for length + data)
         if (self.write_pos + 4 + tx_bytes.len > self.buffer.len) {
             return error.StorageFull;
         }
-        
+
         // Store index before writing
         const index = self.count;
-        
+
         // Write length prefix (4 bytes, little-endian)
         std.mem.writeInt(u32, self.buffer[self.write_pos..][0..4], @intCast(tx_bytes.len), .little);
         self.write_pos += 4;
-        
+
         // Copy transaction bytes into buffer
         std.mem.copyForwards(u8, self.buffer[self.write_pos..], tx_bytes);
         self.write_pos += tx_bytes.len;
         self.count += 1;
-        
+
         return index;
     }
 
@@ -93,11 +113,11 @@ const TransactionStorage = struct {
         if (index >= self.count) {
             return error.InvalidIndex;
         }
-        
+
         // Scan to find the transaction at the given index
         var pos: usize = 0;
         var current_index: usize = 0;
-        
+
         while (current_index < index) : (current_index += 1) {
             if (pos + 4 > self.write_pos) {
                 return error.InvalidIndex;
@@ -105,19 +125,19 @@ const TransactionStorage = struct {
             const len = std.mem.readInt(u32, self.buffer[pos..][0..4], .little);
             pos += 4 + len;
         }
-        
+
         // Read the transaction at the current position
         if (pos + 4 > self.write_pos) {
             return error.InvalidIndex;
         }
         const tx_len = std.mem.readInt(u32, self.buffer[pos..][0..4], .little);
         pos += 4;
-        
+
         if (pos + tx_len > self.write_pos) {
             return error.InvalidIndex;
         }
-        const tx_bytes = self.buffer[pos..pos + tx_len];
-        
+        const tx_bytes = self.buffer[pos .. pos + tx_len];
+
         // Deserialize transaction
         const rlp_module = @import("../core/rlp.zig");
         return rlp_module.decodeTransaction(self.allocator, tx_bytes);
@@ -139,17 +159,17 @@ pub const Mempool = struct {
     // Store transactions in custom storage (avoids HashMap/ArrayList with slices)
     storage: TransactionStorage,
     // HashMap stores hash -> index (usize, not a slice)
-    by_hash: std.HashMap(core.types.Hash, usize, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
+    // Use custom context for U256 struct to avoid allocator bug
+    by_hash: std.HashMap(core.types.Hash, usize, HashContext, std.hash_map.default_max_load_percentage),
     // Store metadata separately (hash -> metadata)
-    metadata: std.HashMap(core.types.Hash, EntryMetadata, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
+    metadata: std.HashMap(core.types.Hash, EntryMetadata, HashContext, std.hash_map.default_max_load_percentage),
     // Priority queue stores hash with metadata (avoids copying Transaction structs with slices)
     entries: std.PriorityQueue(QueueEntry, void, compareQueueEntry),
-    // Store sender -> hash mappings using a custom structure to avoid ArrayList in HashMap
-    // Use HashMap<Address, usize> where usize is an index into a separate pre-allocated array
-    by_sender: std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
-    // Pre-allocated array for sender hash lists (avoids ArrayList storing slices)
-    sender_hash_lists: []?[]core.types.Hash,
-    sender_hash_lists_count: usize = 0,
+    // Store sender -> transaction indices directly
+    // Use HashMap<Address, usize> where usize is the first transaction index for that sender
+    // Then scan storage for all transactions from that sender
+    // This avoids arrays of slices/hashes which trigger the allocator bug
+    by_sender: std.HashMap(core.types.Address, usize, AddressContext, std.hash_map.default_max_load_percentage),
     wal: ?wal.WriteAheadLog = null,
     size: usize = 0,
 
@@ -157,19 +177,17 @@ pub const Mempool = struct {
         // Initialize custom transaction storage (pre-allocated, avoids allocator bug)
         var storage = try TransactionStorage.init(allocator, @intCast(cfg.mempool_max_size));
         errdefer storage.deinit();
-        
+
         // Don't pre-allocate HashMap capacity - let it grow naturally
         // Pre-allocation might trigger the allocator bug
         var mempool = Mempool{
             .allocator = allocator,
             .config = cfg,
             .storage = storage,
-            .by_hash = std.HashMap(core.types.Hash, usize, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
-            .metadata = std.HashMap(core.types.Hash, EntryMetadata, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
+            .by_hash = std.HashMap(core.types.Hash, usize, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .metadata = std.HashMap(core.types.Hash, EntryMetadata, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
             .entries = std.PriorityQueue(QueueEntry, void, compareQueueEntry).init(allocator, {}),
-            .by_sender = std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage).init(allocator),
-            .sender_hash_lists = try allocator.alloc(?[]core.types.Hash, @intCast(cfg.mempool_max_size)),
-            .sender_hash_lists_count = 0,
+            .by_sender = std.HashMap(core.types.Address, usize, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
         };
 
         // Initialize WAL if configured
@@ -186,13 +204,6 @@ pub const Mempool = struct {
         // Clean up custom storage
         self.storage.deinit();
 
-        // Clean up sender hash lists
-        for (self.sender_hash_lists[0..self.sender_hash_lists_count]) |maybe_hash_list| {
-            if (maybe_hash_list) |hash_list| {
-                self.allocator.free(hash_list);
-            }
-        }
-        self.allocator.free(self.sender_hash_lists);
         self.by_sender.deinit();
 
         // Clear priority queue
@@ -214,7 +225,7 @@ pub const Mempool = struct {
         }
 
         const tx_hash = try tx.hash(self.allocator);
-        defer self.allocator.free(tx_hash);
+        // tx_hash is U256 struct (not allocated), no need to free
 
         // Check if already exists
         if (self.by_hash.contains(tx_hash)) {
@@ -256,27 +267,14 @@ pub const Mempool = struct {
             .received_at = @intCast(now),
         });
 
-        // Index by sender (store hashes)
+        // Index by sender: store first transaction index for this sender
+        // We'll scan storage when needed to find all transactions from this sender
         const sender_entry = try self.by_sender.getOrPut(sender);
         if (!sender_entry.found_existing) {
-            // Create new hash list
-            const hash_list = try self.allocator.alloc(core.types.Hash, 1);
-            hash_list[0] = tx_hash;
-            const list_index = self.sender_hash_lists_count;
-            self.sender_hash_lists[list_index] = hash_list;
-            self.sender_hash_lists_count += 1;
-            sender_entry.value_ptr.* = list_index;
-        } else {
-            // Append to existing list
-            const list_index = sender_entry.value_ptr.*;
-            if (list_index < self.sender_hash_lists_count) {
-                if (self.sender_hash_lists[list_index]) |old_list| {
-                    const new_list = try self.allocator.realloc(old_list, old_list.len + 1);
-                    new_list[old_list.len] = tx_hash;
-                    self.sender_hash_lists[list_index] = new_list;
-                }
-            }
+            // New sender: store transaction index
+            sender_entry.value_ptr.* = tx_index;
         }
+        // For existing senders, we keep the first index (used for scanning)
 
         self.size += 1;
         return true;
@@ -285,37 +283,31 @@ pub const Mempool = struct {
     pub fn remove(self: *Mempool, tx_hash: core.types.Hash) !?core.transaction.Transaction {
         const tx_index_kv = self.by_hash.fetchRemove(tx_hash) orelse return null;
         const tx_index = tx_index_kv.value;
-        
+
         // Get transaction from storage
         const tx = self.storage.get(tx_index) catch return null;
-        
+
         // Remove metadata
         _ = self.metadata.remove(tx_hash);
 
         // Remove from sender index
+        // Check if this is the last transaction from this sender
         const sender = try tx.sender();
-        if (self.by_sender.get(sender)) |list_index| {
-            if (list_index < self.sender_hash_lists_count) {
-                if (self.sender_hash_lists[list_index]) |hash_list| {
-                    var i: usize = 0;
-                    while (i < hash_list.len) : (i += 1) {
-                        if (std.mem.eql(u8, &hash_list[i], &tx_hash)) {
-                            // Remove hash from list
-                            if (hash_list.len == 1) {
-                                self.allocator.free(hash_list);
-                                self.sender_hash_lists[list_index] = null;
-                                _ = self.by_sender.remove(sender);
-                            } else {
-                                const new_list = try self.allocator.realloc(hash_list, hash_list.len - 1);
-                                std.mem.copyForwards(core.types.Hash, new_list[0..], hash_list[0..i]);
-                                std.mem.copyForwards(core.types.Hash, new_list[i..], hash_list[i + 1..]);
-                                self.sender_hash_lists[list_index] = new_list;
-                            }
-                            break;
-                        }
-                    }
-                }
+        var has_other_txs = false;
+        // Scan storage to see if sender has other transactions
+        var i: usize = 0;
+        while (i < self.storage.count) : (i += 1) {
+            if (i == tx_index) continue; // Skip the one we're removing
+            const other_tx = self.storage.get(i) catch continue;
+            const other_sender = other_tx.sender() catch continue;
+            if (other_sender.eql(sender)) {
+                has_other_txs = true;
+                break;
             }
+        }
+        if (!has_other_txs) {
+            // Last transaction from this sender, remove entry
+            _ = self.by_sender.remove(sender);
         }
 
         self.size -= 1;
@@ -323,7 +315,7 @@ pub const Mempool = struct {
     }
 
     pub fn getTopN(self: *Mempool, gas_limit: u64, max_count: usize) ![]core.transaction.Transaction {
-        var result = std.ArrayList(core.transaction.Transaction).init(self.allocator);
+        var result = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
         errdefer result.deinit();
 
         var remaining_gas: u64 = gas_limit;
@@ -339,7 +331,7 @@ pub const Mempool = struct {
                 // Transaction was removed, skip
                 continue;
             };
-            
+
             const tx = self.storage.get(tx_index) catch {
                 // If retrieval fails, skip
                 continue;
@@ -367,27 +359,22 @@ pub const Mempool = struct {
     }
 
     pub fn getBySender(self: *const Mempool, sender: core.types.Address) ![]core.transaction.Transaction {
-        const list_index = self.by_sender.get(sender) orelse return &[_]core.transaction.Transaction{};
-        if (list_index >= self.sender_hash_lists_count) {
-            return &[_]core.transaction.Transaction{};
-        }
-        
-        const maybe_sender_hashes = self.sender_hash_lists[list_index];
-        const sender_hashes = maybe_sender_hashes orelse return &[_]core.transaction.Transaction{};
-        
-        var result = std.ArrayList(core.transaction.Transaction).init(self.allocator);
+        // Check if sender exists
+        _ = self.by_sender.get(sender) orelse return &[_]core.transaction.Transaction{};
+
+        var result = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
         defer result.deinit();
-        
-        for (sender_hashes) |hash| {
-            if (self.by_hash.get(hash)) |tx_index| {
-                const tx = self.storage.get(tx_index) catch {
-                    // If retrieval fails, skip
-                    continue;
-                };
+
+        // Scan storage to find all transactions from this sender
+        var i: usize = 0;
+        while (i < self.storage.count) : (i += 1) {
+            const tx = self.storage.get(i) catch continue;
+            const tx_sender = tx.sender() catch continue;
+            if (tx_sender.eql(sender)) {
                 try result.append(tx);
             }
         }
-        
+
         return result.toOwnedSlice();
     }
 

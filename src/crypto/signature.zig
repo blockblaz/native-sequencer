@@ -1,40 +1,43 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const transaction = @import("../core/transaction.zig");
-const crypto_root = @import("root.zig");
-const zigeth = crypto_root.zigeth;
 const hash = @import("hash.zig");
+const keccak = @import("keccak.zig");
+const secp256k1 = @import("secp256k1_wrapper.zig");
 
 /// Recover Ethereum address from transaction signature
 pub fn recoverAddress(tx: *const transaction.Transaction) !types.Address {
     // Get the transaction hash (unsigned)
-    const tx_hash_bytes = try tx.hash(std.heap.page_allocator);
-    defer std.heap.page_allocator.free(tx_hash_bytes);
+    const tx_hash = try tx.hash(std.heap.page_allocator);
     
-    const tx_hash = zigeth.primitives.Hash.fromBytes(tx_hash_bytes);
+    // Create signature struct from transaction fields
+    const sig = types.Signature{
+        .r = tx.r,
+        .s = tx.s,
+        .v = tx.v,
+    };
     
-    // Create signature from transaction fields
-    const sig = zigeth.primitives.Signature.init(tx.r, tx.s, tx.v);
+    // Recover public key
+    const pub_key = try secp256k1.recoverPublicKey(tx_hash, sig);
     
-    // Recover address using zigeth
-    const recovered_address = try zigeth.crypto.ecdsa.recoverAddress(tx_hash, sig);
-    
-    return recovered_address.bytes;
+    // Derive address from public key
+    return pub_key.toAddress();
 }
 
 /// Verify transaction signature
 pub fn verifySignature(tx: *const transaction.Transaction) !bool {
     // Get the transaction hash
-    const tx_hash_bytes = try tx.hash(std.heap.page_allocator);
-    defer std.heap.page_allocator.free(tx_hash_bytes);
+    const tx_hash = try tx.hash(std.heap.page_allocator);
     
-    const tx_hash = zigeth.primitives.Hash.fromBytes(tx_hash_bytes);
-    
-    // Create signature from transaction fields
-    const sig = zigeth.primitives.Signature.init(tx.r, tx.s, tx.v);
+    // Create signature struct from transaction fields
+    const sig = types.Signature{
+        .r = tx.r,
+        .s = tx.s,
+        .v = tx.v,
+    };
     
     // Recover public key
-    const pub_key = zigeth.crypto.ecdsa.recoverPublicKey(tx_hash, sig) catch return false;
+    const pub_key = secp256k1.recoverPublicKey(tx_hash, sig) catch return false;
     
     // Derive address from public key
     const recovered_address = pub_key.toAddress();
@@ -42,25 +45,19 @@ pub fn verifySignature(tx: *const transaction.Transaction) !bool {
     // Get expected sender
     const expected_sender = try tx.sender();
     
-    // Compare addresses
-    return std.mem.eql(u8, &recovered_address.bytes, &expected_sender);
+    // Compare addresses (U256 comparison)
+    return recovered_address.eql(expected_sender);
 }
 
 /// Sign data with a private key
 pub fn sign(data: []const u8, private_key_bytes: [32]u8) !types.Signature {
     // Create private key from bytes
-    const private_key = try zigeth.crypto.PrivateKey.fromBytes(private_key_bytes);
+    const private_key = try secp256k1.PrivateKey.fromBytes(private_key_bytes);
     
     // Hash the data
-    const data_hash = zigeth.crypto.keccak.hash(data);
+    const data_hash = keccak.hash(data);
     
-    // Sign with zigeth
-    const sig = try zigeth.crypto.ecdsa.Signer.init(private_key).signHash(data_hash);
-    
-    return .{
-        .r = sig.r,
-        .s = sig.s,
-        .v = sig.v,
-    };
+    // Sign with secp256k1
+    return try secp256k1.sign(data_hash, private_key);
 }
 

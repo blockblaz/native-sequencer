@@ -18,12 +18,13 @@ pub const Block = struct {
         var hasher = std.crypto.hash.sha2.Sha256.init(.{});
         const number_bytes = std.mem.asBytes(&self.number);
         hasher.update(number_bytes);
-        hasher.update(&self.parent_hash);
+        const parent_hash_bytes = types.hashToBytes(self.parent_hash);
+        hasher.update(&parent_hash_bytes);
         const timestamp_bytes = std.mem.asBytes(&self.timestamp);
         hasher.update(timestamp_bytes);
-        var block_hash: types.Hash = undefined;
-        hasher.final(&block_hash);
-        return block_hash;
+        var block_hash_bytes: [32]u8 = undefined;
+        hasher.final(&block_hash_bytes);
+        return types.hashFromBytes(block_hash_bytes);
     }
 };
 

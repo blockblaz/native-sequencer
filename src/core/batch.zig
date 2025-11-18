@@ -9,7 +9,7 @@ pub const Batch = struct {
     created_at: u64,
 
     pub fn serialize(self: *const Batch, allocator: std.mem.Allocator) ![]u8 {
-        var list = std.ArrayList(u8).init(allocator);
+        var list = std.array_list.Managed(u8).init(allocator);
         defer list.deinit();
 
         const created_at_bytes = std.mem.asBytes(&self.created_at);
@@ -18,7 +18,8 @@ pub const Batch = struct {
             const block_bytes = std.mem.asBytes(&blk.number);
             try list.appendSlice(block_bytes);
             const block_hash = blk.hash();
-            try list.appendSlice(&block_hash);
+            const block_hash_bytes = types.hashToBytes(block_hash);
+            try list.appendSlice(&block_hash_bytes);
         }
 
         return list.toOwnedSlice();

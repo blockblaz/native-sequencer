@@ -5,13 +5,13 @@ const config = @import("../config/root.zig");
 pub const Builder = struct {
     allocator: std.mem.Allocator,
     config: *const config.Config,
-    blocks: std.ArrayList(core.block.Block),
+    blocks: std.array_list.Managed(core.block.Block),
 
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config) Builder {
         return .{
             .allocator = allocator,
             .config = cfg,
-            .blocks = std.ArrayList(core.block.Block).init(allocator),
+            .blocks = std.array_list.Managed(core.block.Block).init(allocator),
         };
     }
 

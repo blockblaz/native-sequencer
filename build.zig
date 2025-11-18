@@ -2,21 +2,47 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    _ = b.standardOptimizeOption(.{}); // Available for future use
 
-    // Get zigeth dependency
-    const zigeth_dep = b.dependency("zigeth", .{
+    // Build libsecp256k1 static C library from vendor directory
+    // In Zig 0.15, we create a library with a dummy Zig root module
+    const libsecp256k1_root = b.addModule("secp256k1_lib", .{
+        .root_source_file = b.path("vendor/zig-eth-secp256k1/secp256k1_wrapper.zig"),
         .target = target,
-        .optimize = optimize,
     });
-    const zigeth_mod = zigeth_dep.module("zigeth");
+    
+    const libsecp256k1 = b.addLibrary(.{
+        .name = "secp256k1",
+        .linkage = .static,
+        .root_module = libsecp256k1_root,
+    });
+    libsecp256k1.addIncludePath(b.path("vendor/zig-eth-secp256k1/libsecp256k1"));
+    libsecp256k1.addIncludePath(b.path("vendor/zig-eth-secp256k1/libsecp256k1/src"));
+    const cflags = .{
+        "-DUSE_FIELD_10X26=1",
+        "-DUSE_SCALAR_8X32=1",
+        "-DUSE_ENDOMORPHISM=1",
+        "-DUSE_NUM_NONE=1",
+        "-DUSE_FIELD_INV_BUILTIN=1",
+        "-DUSE_SCALAR_INV_BUILTIN=1",
+    };
+    libsecp256k1.addCSourceFile(.{ .file = b.path("vendor/zig-eth-secp256k1/ext.c"), .flags = &cflags });
+    libsecp256k1.linkLibC();
+    b.installArtifact(libsecp256k1);
+
+    // Add secp256k1 module (Zig wrapper)
+    const secp256k1_mod = b.addModule("secp256k1", .{
+        .root_source_file = b.path("vendor/zig-eth-secp256k1/src/secp256k1.zig"),
+        .target = target,
+    });
+    secp256k1_mod.addIncludePath(b.path("vendor/zig-eth-secp256k1"));
+    secp256k1_mod.addIncludePath(b.path("vendor/zig-eth-secp256k1/libsecp256k1"));
 
     const sequencer_module = b.addModule("native-sequencer", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .optimize = optimize,
     });
-    sequencer_module.addImport("zigeth", zigeth_mod);
+    sequencer_module.addImport("secp256k1", secp256k1_mod);
 
     // Library
     const lib = b.addLibrary(.{
@@ -24,34 +50,24 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = sequencer_module,
     });
-    // Link zigeth's secp256k1 dependency
-    const secp256k1_dep = b.dependency("zig_eth_secp256k1", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const secp256k1_artifact = secp256k1_dep.artifact("secp256k1");
-    lib.linkLibrary(secp256k1_artifact);
+    // Link secp256k1 library
+    lib.linkLibrary(libsecp256k1);
     lib.linkLibC();
     b.installArtifact(lib);
 
     // Main executable
-    const exe = b.addExecutable(.{
-        .name = "sequencer",
+    const exe_module = b.addModule("sequencer_exe", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = optimize,
+    });
+    const exe = b.addExecutable(.{
+        .name = "sequencer",
+        .root_module = exe_module,
     });
     exe.root_module.addImport("native-sequencer", sequencer_module);
-    // Add zigeth to executable so it's available to all files
-    exe.root_module.addImport("zigeth", zigeth_mod);
-    
-    // Link zigeth's secp256k1 dependency
-    const secp256k1_dep_exe = b.dependency("zig_eth_secp256k1", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const secp256k1_artifact_exe = secp256k1_dep_exe.artifact("secp256k1");
-    exe.linkLibrary(secp256k1_artifact_exe);
+    exe.root_module.addImport("secp256k1", secp256k1_mod);
+    // Link secp256k1 library
+    exe.linkLibrary(libsecp256k1);
     exe.linkLibC();
     
     b.installArtifact(exe);
@@ -66,19 +82,17 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Tests
-    const unit_tests = b.addTest(.{
+    const test_module = b.addModule("test_module", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .optimize = optimize,
+    });
+    const unit_tests = b.addTest(.{
+        .root_module = test_module,
     });
     unit_tests.root_module.addImport("native-sequencer", sequencer_module);
-    // unit_tests.root_module already has zigeth import via sequencer_module
-    const secp256k1_dep_test = b.dependency("zig_eth_secp256k1", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const secp256k1_artifact_test = secp256k1_dep_test.artifact("secp256k1");
-    unit_tests.linkLibrary(secp256k1_artifact_test);
+    unit_tests.root_module.addImport("secp256k1", secp256k1_mod);
+    // Link secp256k1 library
+    unit_tests.linkLibrary(libsecp256k1);
     unit_tests.linkLibC();
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
@@ -89,4 +103,5 @@ pub fn build(b: *std.Build) void {
     const lint_step = b.step("lint", "Run lint (zig fmt --check)");
     lint_step.dependOn(&lint_cmd.step);
 }
+
 

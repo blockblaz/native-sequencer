@@ -18,7 +18,7 @@ pub const HttpServer = struct {
     pub fn listen(self: *HttpServer) !void {
         // Simplified HTTP server - in production use proper async networking
         // For now, log that we would listen
-        std.log.info("HTTP server would listen on {}", .{self.address});
+        std.log.info("HTTP server would listen on {any}", .{self.address});
         std.log.warn("HTTP server implementation simplified - full networking needs proper Zig 0.14 socket API", .{});
         // TODO: Implement proper socket binding using Zig 0.14 APIs
         // For now, set a placeholder socket value
@@ -117,7 +117,7 @@ pub const HttpResponse = struct {
     }
     
     pub fn format(self: *const HttpResponse, allocator: std.mem.Allocator) ![]u8 {
-        var result = std.ArrayList(u8).init(allocator);
+        var result = std.array_list.Managed(u8).init(allocator);
         errdefer result.deinit();
         
         const status_text = switch (self.status_code) {

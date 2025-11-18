@@ -26,7 +26,7 @@ pub const Ingress = struct {
 
         // Check if duplicate in mempool
         const tx_hash = try tx.hash(self.allocator);
-        defer self.allocator.free(tx_hash);
+        // tx_hash is U256 struct (not allocated), no need to free
         if (self.mempool.contains(tx_hash)) {
             return .duplicate;
         }
@@ -42,7 +42,7 @@ pub const Ingress = struct {
 
     pub fn validateBatch(self: *Ingress, txs: []core.transaction.Transaction) ![]validator.ValidationResult {
         // Use ArrayList to avoid allocator issues
-        var results = std.ArrayList(validator.ValidationResult).init(self.allocator);
+        var results = std.array_list.Managed(validator.ValidationResult).init(self.allocator);
         defer results.deinit();
         errdefer results.deinit();
         

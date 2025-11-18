@@ -13,7 +13,7 @@ pub const RLPError = error{
 pub fn encodeUint(allocator: std.mem.Allocator, value: u256) ![]u8 {
     if (value == 0) {
         // Use ArrayList instead of direct alloc to avoid allocator issues
-        var result = std.ArrayList(u8).init(allocator);
+        var result = std.array_list.Managed(u8).init(allocator);
         errdefer result.deinit();
         try result.append(0x80);
         return result.toOwnedSlice();
@@ -27,7 +27,7 @@ pub fn encodeUint(allocator: std.mem.Allocator, value: u256) ![]u8 {
     while (start < buf.len and buf[start] == 0) start += 1;
     const significant_bytes = buf.len - start;
     
-    var result = std.ArrayList(u8).init(allocator);
+    var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
     
     if (significant_bytes == 1 and buf[start] < 0x80) {
@@ -49,7 +49,7 @@ pub fn encodeUint(allocator: std.mem.Allocator, value: u256) ![]u8 {
 }
 
 fn encodeLength(len: usize) ![]u8 {
-    var result = std.ArrayList(u8).init(std.heap.page_allocator);
+    var result = std.array_list.Managed(u8).init(std.heap.page_allocator);
     errdefer result.deinit();
     
     var n = len;
@@ -74,7 +74,7 @@ fn encodeLength(len: usize) ![]u8 {
 }
 
 pub fn encodeBytes(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
+    var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
     
     if (data.len == 1 and data[0] < 0x80) {
@@ -99,7 +99,7 @@ pub fn encodeList(allocator: std.mem.Allocator, items: []const []const u8) ![]u8
         total_len += item.len;
     }
     
-    var result = std.ArrayList(u8).init(allocator);
+    var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
     
     if (total_len < 56) {
@@ -118,7 +118,7 @@ pub fn encodeList(allocator: std.mem.Allocator, items: []const []const u8) ![]u8
 }
 
 pub fn encodeTransaction(allocator: std.mem.Allocator, tx: *const @import("transaction.zig").Transaction) ![]u8 {
-    var items = std.ArrayList([]const u8).init(allocator);
+    var items = std.array_list.Managed([]const u8).init(allocator);
     defer {
         for (items.items) |item| {
             allocator.free(item);
@@ -136,7 +136,9 @@ pub fn encodeTransaction(allocator: std.mem.Allocator, tx: *const @import("trans
     try items.append(gas_limit);
     
     if (tx.to) |to| {
-        const to_bytes = try encodeBytes(allocator, &to);
+        const types_mod = @import("types.zig");
+        const to_bytes_array = types_mod.addressToBytes(to);
+        const to_bytes = try encodeBytes(allocator, &to_bytes_array);
         try items.append(to_bytes);
     } else {
         const empty = try encodeBytes(allocator, &[_]u8{});

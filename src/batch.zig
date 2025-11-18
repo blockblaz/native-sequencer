@@ -5,13 +5,13 @@ const config = @import("config.zig");
 pub const BatchBuilder = struct {
     allocator: std.mem.Allocator,
     config: *const config.Config,
-    blocks: std.ArrayList(types.Block),
+    blocks: std.array_list.Managed(types.Block),
 
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config) BatchBuilder {
         return .{
             .allocator = allocator,
             .config = cfg,
-            .blocks = std.ArrayList(types.Block).init(allocator),
+            .blocks = std.array_list.Managed(types.Block).init(allocator),
         };
     }
 

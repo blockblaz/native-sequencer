@@ -56,31 +56,31 @@ pub fn main() !void {
 
 fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Builder, l1_client: *lib.l1.Client, m: *lib.metrics.Metrics, cfg: *const lib.config.Config) void {
     while (true) {
-        std.time.sleep(cfg.batch_interval_ms * std.time.ns_per_ms);
+        std.Thread.sleep(cfg.batch_interval_ms * std.time.ns_per_ms);
 
         // Build block
         const block = seq.buildBlock() catch |err| {
-            std.log.err("Error building block: {}", .{err});
+            std.log.err("Error building block: {any}", .{err});
             continue;
         };
         m.incrementBlocksCreated();
 
         // Add to batch
         batch_builder.addBlock(block) catch |err| {
-            std.log.err("Error adding block to batch: {}", .{err});
+            std.log.err("Error adding block to batch: {any}", .{err});
             continue;
         };
 
         // Flush batch if needed
         if (batch_builder.shouldFlush()) {
             const batch_data = batch_builder.buildBatch() catch |err| {
-                std.log.err("Error building batch: {}", .{err});
+                std.log.err("Error building batch: {any}", .{err});
                 continue;
             };
 
             // Submit to L1
             _ = l1_client.submitBatch(batch_data) catch |err| {
-                std.log.err("Error submitting batch to L1: {}", .{err});
+                std.log.err("Error submitting batch to L1: {any}", .{err});
                 m.incrementL1SubmissionErrors();
                 continue;
             };
@@ -98,7 +98,7 @@ fn metricsLoop(m: *lib.metrics.Metrics, port: u16) void {
     // TODO: Implement proper metrics server using Zig 0.14 networking APIs
     // For now, just sleep to keep thread alive
     while (true) {
-        std.time.sleep(1 * std.time.ns_per_s);
+        std.Thread.sleep(1 * std.time.ns_per_s);
         _ = m;
     }
 }

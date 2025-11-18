@@ -2,17 +2,8 @@
     .name = .native_sequencer,
     .version = "0.1.0",
     .fingerprint = 0xf01d1595a0ff6442,
-    .minimum_zig_version = "0.15.0",
-    .dependencies = .{
-        .zigeth = .{
-            .url = "https://github.com/ch4r10t33r/zigeth/archive/refs/heads/master.tar.gz",
-            .hash = "zigeth-0.2.1-5mqWFE7XDwCr_ox8THO2uw3zdAO0fN-TZrpcUJ5aHsSe",
-        },
-        .zig_eth_secp256k1 = .{
-            .url = "https://github.com/jsign/zig-eth-secp256k1/archive/refs/heads/main.tar.gz",
-            .hash = "zig_eth_secp256k1-0.1.0-_U97sGzoDACkTnLX6ggeDfs_MhZHyxapYfhPPAtoQJJG",
-        },
-    },
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",

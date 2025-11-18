@@ -28,7 +28,7 @@ pub const Transaction = struct {
 
     pub fn serialize(self: *const Transaction, allocator: std.mem.Allocator) ![]u8 {
         // Simplified RLP encoding - in production use proper RLP
-        var list = std.ArrayList(u8).init(allocator);
+        var list = std.array_list.Managed(u8).init(allocator);
         defer list.deinit();
 
         // Encode fields (simplified)
@@ -49,7 +49,7 @@ pub const Transaction = struct {
         return list.toOwnedSlice();
     }
 
-    fn encodeUint(list: *std.ArrayList(u8), value: anytype) !void {
+    fn encodeUint(list: *std.array_list.Managed(u8), value: anytype) !void {
         var buf: [32]u8 = undefined;
         std.mem.writeInt(u256, &buf, value, .big);
         var start: usize = 0;
@@ -108,7 +108,7 @@ pub const Batch = struct {
     created_at: u64,
 
     pub fn serialize(self: *const Batch, allocator: std.mem.Allocator) ![]u8 {
-        var list = std.ArrayList(u8).init(allocator);
+        var list = std.array_list.Managed(u8).init(allocator);
         defer list.deinit();
 
         const created_at_bytes = std.mem.asBytes(&self.created_at);

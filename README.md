@@ -1,25 +1,48 @@
 # Native Sequencer
 
-## Known Issues
+## Known Issues & Workarounds
 
-### Zig 0.14.1 Allocator Bug
+### Zig 0.15.2 HashMap Allocator Bug (RESOLVED)
 
-This project encountered a compiler bug in Zig 0.14.1 related to allocating arrays of structs containing slices. See **[ZIG_0.14_ALLOCATOR_ERROR.md](ZIG_0.14_ALLOCATOR_ERROR.md)** for detailed explanation and workarounds attempted.
+**Status**: ✅ **RESOLVED** - Custom U256 implementation workaround implemented
+
+This project encountered a compiler bug in Zig 0.15.2 related to HashMap initialization with native `u256` types as keys. The error manifests as:
+```
+error: access of union field 'pointer' while field 'int' is active
+at std/mem/Allocator.zig:425:45
+```
+
+**Root Cause**: The bug is in HashMap's `AutoContext` type introspection code when handling large integer types (`u256`). This is a compiler bug, not an issue with our code.
+
+**Solution**: We implemented a custom `U256` struct using two `u128` fields with explicit `hash()` and `eql()` methods, along with custom HashMap contexts (`HashContext`, `AddressContext`). This bypasses the problematic `AutoContext` code path entirely.
+
+**Implementation Details**:
+- Custom `U256` struct in `src/core/types.zig` with two `u128` fields (`low`, `high`)
+- Custom hash function combining both halves via XOR
+- Custom equality comparison
+- Custom HashMap contexts for `Hash` and `Address` types
+- Full compatibility with 32-byte hashes and 20-byte addresses
+
+**Performance**: No performance penalty - the struct is stack-allocated and operations are efficient.
+
+See `src/core/types.zig` for detailed comments explaining the implementation.
+
+### Zig 0.14.x Allocator Bug (Historical)
+
+This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). See **[ZIG_0.14_ALLOCATOR_ERROR.md](ZIG_0.14_ALLOCATOR_ERROR.md)** for detailed explanation and workarounds attempted.
 
 ### Upgrading to Zig 0.15.2
 
-This project is being upgraded to Zig 0.15.2 to resolve the allocator bug. See **[ZIG_0.15_UPGRADE.md](ZIG_0.15_UPGRADE.md)** for detailed information about the upgrade process, encountered errors, and solutions.
+This project has been successfully upgraded to Zig 0.15.2. See **[ZIG_0.15_UPGRADE.md](ZIG_0.15_UPGRADE.md)** for detailed information about the upgrade process, encountered errors, and solutions.
 
 ### Current Status
 
-- ✅ Updated `build.zig.zon` to require Zig 0.15.0+
-- ✅ Updated `build.zig` for Zig 0.15 API
-- ⏳ Waiting for `zig_eth_secp256k1` dependency to be updated for Zig 0.15 (see [ZIG_0.15_UPGRADE.md](ZIG_0.15_UPGRADE.md) for fork solution)
-- ⏳ Code updates for Zig 0.15 API changes (pending - ArrayList, HashMap, etc.)
-
-### Quick Summary
-
-The main blocker is that `zig_eth_secp256k1` dependency still uses the old Zig 0.14 `addStaticLibrary` API, which was replaced with `addLibrary` in Zig 0.15. See the upgrade document for detailed steps on forking and updating the dependency.
+- ✅ Updated `build.zig.zon` to require Zig 0.15.2
+- ✅ Updated `build.zig` for Zig 0.15 API changes
+- ✅ Vendored `zig_eth_secp256k1` dependency (C library integration)
+- ✅ Updated code for Zig 0.15 API changes (ArrayList → array_list.Managed, etc.)
+- ✅ Resolved HashMap allocator bug with custom U256 implementation
+- ✅ Project builds successfully with Zig 0.15.2
 
 ---
 
@@ -51,6 +74,18 @@ The sequencer follows a modular architecture:
 - **L1 Client**: Submits batches to L1 blockchain
 - **State Manager**: Tracks account state (nonces, balances)
 - **Metrics**: Exposes observability metrics
+
+## Technical Details
+
+### Custom U256 Implementation
+
+Due to a compiler bug in Zig 0.15.2's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
+- Uses two `u128` fields to represent 256-bit values
+- Provides conversion functions to/from native `u256` and byte arrays
+- Includes custom hash and equality functions for HashMap compatibility
+- Maintains full compatibility with Ethereum's 32-byte hashes and 20-byte addresses
+
+See `src/core/types.zig` for implementation details and rationale.
 
 ## Building
 
