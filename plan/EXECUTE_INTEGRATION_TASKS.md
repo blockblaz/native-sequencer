@@ -17,12 +17,18 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 ┌─────────────────────────────────────────────────────────────┐
 │                    L2 Node (geth)                            │
 │  - Runs geth with EXECUTE precompile                         │
-│  - Interfaces with native-sequencer                          │
+│  - Exposes Engine API for sequencer communication            │
 │  - Accepts L2 transactions from users                        │
-│  - Provides state to native-sequencer                       │
+│  - Provides state to native-sequencer via Engine API        │
 └─────────────────────────────────────────────────────────────┘
                         ▲
-                        │ L2 transactions
+                        │ Engine API (JSON-RPC)
+                        │ - engine_newPayload
+                        │ - engine_getPayload
+                        │ - engine_forkchoiceUpdated
+                        │ - eth_getBlockByNumber
+                        │ - eth_getBalance
+                        │ - eth_getCode
                         │
 ┌─────────────────────────────────────────────────────────────┐
 │              Native Sequencer (Zig)                          │
@@ -30,6 +36,7 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 │  - Sequences and orders transactions                         │
 │  - Builds blocks and batches                                  │
 │  - Generates witnesses for stateless execution              │
+│  - Communicates with L2 geth via Engine API                  │
 │  - Creates ExecuteTx transactions for L1                     │
 │  - Submits batches to L1 via ExecuteTx                       │
 └─────────────────────────────────────────────────────────────┘
@@ -146,36 +153,43 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 
 **Tasks**:
 - [ ] **4.1** Design L2 node interface protocol
-  - Define communication protocol between geth and native-sequencer
-  - JSON-RPC endpoints for sequencer operations
-  - State query endpoints
-  - Transaction submission endpoints
+  - Use Engine API (JSON-RPC) for communication between geth and native-sequencer
+  - Engine API endpoints: `engine_newPayload`, `engine_getPayload`, `engine_forkchoiceUpdated`
+  - Standard Ethereum JSON-RPC endpoints: `eth_getBlockByNumber`, `eth_getBalance`, `eth_getCode`, `eth_getStorageAt`
+  - Transaction submission endpoints: `eth_sendRawTransaction`
   - **File**: `docs/L2_NODE_INTEGRATION.md` (new file)
 
-- [ ] **4.2** Implement sequencer RPC endpoints in geth
-  - `sequencer_submitTransaction` - Submit L2 transaction to sequencer
-  - `sequencer_getPendingTransactions` - Get pending transactions
-  - `sequencer_getState` - Get account state (nonce, balance)
-  - `sequencer_getBlock` - Get sequencer block
-  - **Location**: go-ethereum `rpc/` or `internal/ethapi/` (Go code)
+- [ ] **4.2** Implement Engine API client in native-sequencer
+  - Implement Engine API client for L2 geth communication
+  - `engine_newPayload` - Submit sequencer-built blocks to L2 geth
+  - `engine_getPayload` - Retrieve payloads from L2 geth
+  - `engine_forkchoiceUpdated` - Update fork choice state
+  - Use standard Ethereum JSON-RPC for state queries (`eth_getBlockByNumber`, `eth_getBalance`, `eth_getCode`, etc.)
+  - **File**: `src/l2/engine_api_client.zig` (new file)
 
 - [ ] **4.3** Implement state provider for native-sequencer
-  - Query L2 geth node for state data
-  - Get account balances and nonces
-  - Get contract bytecodes
-  - Get block headers
+  - Query L2 geth node for state data via Engine API and standard JSON-RPC
+  - Use `eth_getBalance` for account balances
+  - Use `eth_getTransactionCount` for nonces
+  - Use `eth_getCode` for contract bytecodes
+  - Use `eth_getBlockByNumber` for block headers
+  - Use `eth_getStorageAt` for storage values
   - **File**: `src/l2/state_provider.zig` (new file)
 
 - [ ] **4.4** Implement transaction forwarding
-  - Forward L2 transactions from geth to native-sequencer
+  - L2 geth forwards transactions to native-sequencer via Engine API or custom endpoint
+  - Native-sequencer validates and sequences transactions
+  - Submit sequenced blocks back to L2 geth via `engine_newPayload`
   - Handle transaction validation responses
-  - Forward execution results back to geth
+  - Forward execution results back to geth via Engine API
   - **File**: `src/l2/tx_forwarder.zig` (new file)
 
 - [ ] **4.5** Implement block synchronization
-  - Sync sequencer blocks to L2 geth node
+  - Sync sequencer blocks to L2 geth node via `engine_newPayload`
+  - Update fork choice state via `engine_forkchoiceUpdated`
   - Update L2 geth state with sequencer blocks
-  - Handle reorgs and chain reorganization
+  - Handle reorgs and chain reorganization via Engine API
+  - Monitor L2 geth sync status
   - **File**: `src/l2/sync.zig` (new file)
 
 ### 🟡 High Priority (Required for Production)
@@ -288,7 +302,9 @@ This document outlines all tasks needed to integrate the native-sequencer with t
   - **File**: `src/config/config.zig`
 
 - [ ] **8.2** Add L2 node connection configuration
-  - L2 geth RPC URL
+  - L2 geth Engine API URL
+  - L2 geth JSON-RPC URL (for standard endpoints)
+  - Engine API JWT secret for authentication
   - L2 chain ID
   - Connection timeout settings
   - **File**: `src/config/config.zig`
@@ -347,9 +363,11 @@ This document outlines all tasks needed to integrate the native-sequencer with t
   - **File**: `docs/WITNESS_FORMAT.md` (new file)
 
 - [ ] **10.3** Document L2 node integration
-  - RPC endpoint specifications
-  - Communication protocol
-  - Setup instructions
+  - Engine API endpoint specifications
+  - Standard JSON-RPC endpoint usage
+  - Communication protocol and message flow
+  - Setup instructions for Engine API
+  - Authentication and security considerations
   - **File**: `docs/L2_NODE_INTEGRATION.md` (new file)
 
 - [ ] **10.4** Update README with ExecuteTx support
@@ -500,6 +518,7 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 
 ### External Dependencies
 - [ ] go-ethereum with EXECUTE precompile (already available)
+- [ ] Engine API support in L2 geth node (standard Engine API)
 - [ ] MPT trie library for Zig (may need to implement or use existing)
 - [ ] RLP encoding/decoding (already implemented)
 - [ ] Keccak-256 hashing (already implemented)
@@ -507,9 +526,10 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 
 ### Infrastructure Setup
 - [ ] L1 geth node with EXECUTE precompile enabled
-- [ ] L2 geth node with EXECUTE precompile enabled
+- [ ] L2 geth node with EXECUTE precompile enabled and Engine API exposed
+- [ ] Engine API authentication configured (JWT secret)
 - [ ] Network connectivity between L1, L2, and sequencer
-- [ ] Test environment setup
+- [ ] Test environment setup with Engine API endpoints
 
 ## Testing Strategy
 
@@ -522,8 +542,9 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 ### Integration Tests
 - ExecuteTx submission to L1
 - Witness generation during execution
-- L2 node communication
-- State synchronization
+- L2 node communication via Engine API
+- Engine API endpoint testing (`engine_newPayload`, `engine_getPayload`, `engine_forkchoiceUpdated`)
+- State synchronization via Engine API
 
 ### End-to-End Tests
 - Full flow: L2 tx → sequencer → ExecuteTx → L1
@@ -545,7 +566,8 @@ This document outlines all tasks needed to integrate the native-sequencer with t
 - The go-ethereum EXECUTE precompile is already implemented and tested
 - The native-sequencer has basic transaction handling but needs ExecuteTx support
 - Witness generation is the most complex part and will require significant effort
-- L2 node integration requires coordination with geth modifications
+- L2 node integration uses Engine API (standard protocol, no geth modifications needed)
+- Engine API provides standardized communication between sequencer and L2 execution client
 - Consider starting with a simplified witness format for initial implementation
 
 
