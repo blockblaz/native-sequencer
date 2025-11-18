@@ -375,6 +375,29 @@ Get the current block number.
 }
 ```
 
+### L1 Client Features
+
+The sequencer includes a full-featured HTTP client for L1 communication:
+
+- **Standard Transaction Submission**: `eth_sendRawTransaction` for submitting batches to L1
+- **Conditional Transaction Submission**: `eth_sendRawTransactionConditional` (EIP-7796) for conditional batch submission with block number constraints
+- **Transaction Receipt Polling**: `eth_getTransactionReceipt` for tracking batch inclusion
+- **Block Number Queries**: `eth_blockNumber` for L1 state synchronization
+- **Automatic Confirmation Waiting**: `waitForInclusion()` method for polling transaction confirmations
+
+#### Conditional Transaction Submission
+
+The sequencer supports EIP-7796 conditional transaction submission, allowing batches to be submitted with preconditions:
+
+```zig
+const options = l1.Client.ConditionalOptions{
+    .block_number_max = 1000000, // Only include if block <= 1000000
+};
+const tx_hash = try l1_client.submitBatchConditional(batch, options);
+```
+
+This feature enables more efficient batch submission by allowing the sequencer to specify maximum block numbers for inclusion, reducing the need for extensive simulations.
+
 ### Metrics
 
 Access metrics at `http://localhost:9090` (or configured port).
@@ -396,6 +419,9 @@ This is an initial implementation. Production use requires:
 - ✅ Basic state management
 - ✅ RLP encoding/decoding (complete implementation with tests)
 - ✅ Docker support
+- ✅ HTTP server implementation (Zig 0.15 networking APIs)
+- ✅ HTTP client for L1 communication (JSON-RPC support)
+- ✅ Conditional transaction submission (EIP-7796 support)
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
 - ⏳ Full transaction execution engine
 - ⏳ RocksDB/LMDB integration for persistence
@@ -405,6 +431,15 @@ This is an initial implementation. Production use requires:
 - ⏳ Comprehensive testing
 
 ## Technical Details
+
+### Networking Implementation
+
+The sequencer uses Zig 0.15.2's standard library networking APIs:
+
+- **HTTP Server**: Built on `std.net.Server` and `std.net.Stream` for accepting JSON-RPC connections
+- **HTTP Client**: Uses `std.net.tcpConnectToAddress` for L1 RPC communication
+- **Connection Handling**: Thread-based concurrent request handling with proper resource cleanup
+- **RLP Transaction Parsing**: Full RLP decoding support for transaction deserialization
 
 ### Custom U256 Implementation
 

@@ -1,4 +1,4 @@
-// HTTP server implementation using Zig 0.14 networking
+// HTTP server implementation using Zig 0.15 networking
 
 const std = @import("std");
 const jsonrpc = @import("jsonrpc.zig");
@@ -6,7 +6,7 @@ const jsonrpc = @import("jsonrpc.zig");
 pub const HttpServer = struct {
     allocator: std.mem.Allocator,
     address: std.net.Address,
-    socket: ?std.posix.fd_t = null,
+    server: ?std.net.Server = null,
     
     pub fn init(allocator: std.mem.Allocator, address: std.net.Address) HttpServer {
         return .{
@@ -16,35 +16,40 @@ pub const HttpServer = struct {
     }
     
     pub fn listen(self: *HttpServer) !void {
-        // Simplified HTTP server - in production use proper async networking
-        // For now, log that we would listen
-        std.log.info("HTTP server would listen on {any}", .{self.address});
-        std.log.warn("HTTP server implementation simplified - full networking needs proper Zig 0.14 socket API", .{});
-        // TODO: Implement proper socket binding using Zig 0.14 APIs
-        // For now, set a placeholder socket value
-        self.socket = 0; // Placeholder
+        const server = try self.address.listen(.{
+            .reuse_address = true,
+            .kernel_backlog = 128,
+        });
+        self.server = server;
+        
+        std.log.info("HTTP server listening on {any}", .{self.address});
     }
     
     pub fn accept(self: *HttpServer) !Connection {
-        _ = self;
-        // Simplified - in production implement proper accept
-        return error.NotImplemented;
+        var server = self.server orelse return error.NotListening;
+        
+        const conn = try server.accept();
+        
+        return Connection{
+            .stream = conn.stream,
+            .allocator = self.allocator,
+        };
     }
     
     pub fn deinit(self: *HttpServer) void {
-        if (self.socket) |fd| {
-            std.posix.close(fd);
+        if (self.server) |*server| {
+            server.deinit();
         }
     }
 };
 
 pub const Connection = struct {
-    fd: std.posix.fd_t,
+    stream: std.net.Stream,
     allocator: std.mem.Allocator,
     
     pub fn readRequest(self: *Connection) !HttpRequest {
         var buffer: [8192]u8 = undefined;
-        const bytes_read = try std.posix.read(self.fd, &buffer);
+        const bytes_read = try self.stream.read(&buffer);
         if (bytes_read == 0) return error.ConnectionClosed;
         
         const request_str = buffer[0..bytes_read];
@@ -52,11 +57,11 @@ pub const Connection = struct {
     }
     
     pub fn writeResponse(self: *Connection, response: []const u8) !void {
-        _ = try std.posix.write(self.fd, response);
+        _ = try self.stream.writeAll(response);
     }
     
     pub fn close(self: *Connection) void {
-        std.posix.close(self.fd);
+        self.stream.close();
     }
 };
 

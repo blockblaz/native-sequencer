@@ -167,19 +167,18 @@ pub const JsonRpcServer = struct {
         }
 
         // Decode RLP transaction
-        // For now, create a simplified transaction
-        // In production, use core.rlp.decodeTransaction
-        const tx = core.transaction.Transaction{
-            .nonce = 0,
-            .gas_price = 1_000_000_000,
-            .gas_limit = 21_000,
-            .to = null,
-            .value = 0,
-            .data = tx_bytes.items,
-            .v = 0,
-            .r = [_]u8{0} ** 32,
-            .s = [_]u8{0} ** 32,
+        const tx_bytes_slice = try tx_bytes.toOwnedSlice();
+        defer self.allocator.free(tx_bytes_slice);
+        
+        const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(
+                self.allocator,
+                request.id,
+                jsonrpc.ErrorCode.InvalidParams,
+                "Invalid transaction encoding"
+            );
         };
+        defer self.allocator.free(tx.data);
 
         const result = self.ingress_handler.acceptTransaction(tx) catch {
             self.metrics.incrementTransactionsRejected();
