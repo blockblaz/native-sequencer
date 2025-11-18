@@ -5,7 +5,6 @@ pub fn build(b: *std.Build) void {
     _ = b.standardOptimizeOption(.{}); // Available for future use
 
     // Build libsecp256k1 static C library from vendor directory
-    // In Zig 0.15, we create a library with a dummy Zig root module
     const libsecp256k1_root = b.addModule("secp256k1_lib", .{
         .root_source_file = b.path("vendor/zig-eth-secp256k1/secp256k1_wrapper.zig"),
         .target = target,

@@ -42,7 +42,7 @@ pub const Ingress = struct {
 
     pub fn validateBatch(self: *Ingress, txs: []core.transaction.Transaction) ![]validator.ValidationResult {
         // Use ArrayList to avoid allocator issues
-        var results = std.array_list.Managed(validator.ValidationResult).init(self.allocator);
+        var results = std.ArrayList(validator.ValidationResult).init(self.allocator);
         defer results.deinit();
         errdefer results.deinit();
 

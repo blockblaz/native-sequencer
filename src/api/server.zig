@@ -126,7 +126,7 @@ pub const JsonRpcServer = struct {
         const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
         const hex_data = tx_hex[hex_start..];
 
-        var tx_bytes = std.array_list.Managed(u8).init(self.allocator);
+        var tx_bytes = std.ArrayList(u8).init(self.allocator);
         defer tx_bytes.deinit();
 
         var i: usize = 0;

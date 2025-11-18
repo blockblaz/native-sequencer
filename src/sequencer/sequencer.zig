@@ -57,7 +57,7 @@ pub const Sequencer = struct {
 
         // Build block
         var gas_used: u64 = 0;
-        var valid_txs = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
+        var valid_txs = std.ArrayList(core.transaction.Transaction).init(self.allocator);
         defer valid_txs.deinit();
 
         for (mev_txs) |tx| {

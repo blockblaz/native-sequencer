@@ -19,7 +19,11 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.14.1
+      
+      - name: Fetch dependencies
+        run: |
+          zig build --fetch
       
       - name: Run linting checks
         run: |
@@ -40,7 +44,11 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.14.1
+      
+      - name: Fetch dependencies
+        run: |
+          zig build --fetch
       
       - name: Build for Linux x86_64
         run: |
@@ -62,7 +70,11 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.14.1
+      
+      - name: Fetch dependencies
+        run: |
+          zig build --fetch
       
       - name: Build for macOS x86_64
         run: |
@@ -84,7 +96,11 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.14.1
+      
+      - name: Fetch dependencies
+        run: |
+          zig build --fetch
       
       - name: Build for macOS ARM64
         run: |
@@ -106,7 +122,11 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.14.1
+      
+      - name: Fetch dependencies
+        run: |
+          zig build --fetch
       
       - name: Build for Windows x86_64
         run: |

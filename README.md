@@ -16,7 +16,7 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 - **Excellent C interop** - reuse battle-tested C libraries (RocksDB, libsecp256k1, etc.)
 - **Strong control over memory layout** - enables zero-copy network stacks and deterministic serialization
 - **Modern tooling** - easy cross-compilation for Linux amd64/arm64 containers
-- **Built with Zig 0.15.2** for stability and performance
+- **Built with Zig 0.14.1** for stability and performance
 
 ## Features
 
@@ -74,7 +74,7 @@ The sequencer follows a modular architecture:
 
 ### Prerequisites
 
-- **Zig 0.15.2** or later ([Install Zig](https://ziglang.org/download/))
+- **Zig 0.14.1** ([Install Zig](https://ziglang.org/download/))
 - **C compiler** (for vendored C dependencies)
 
 ### Build Commands
@@ -131,7 +131,7 @@ docker rm sequencer
 
 The Dockerfile uses a multi-stage build:
 
-1. **Builder Stage**: Installs Zig 0.15.2 and builds the sequencer
+1. **Builder Stage**: Installs Zig 0.14.1 and builds the sequencer
 2. **Runtime Stage**: Creates a minimal runtime image with just the binary
 
 #### Runtime Environment Variables
@@ -429,7 +429,7 @@ This is an experimental implementation. The following features are implemented o
 - ✅ Basic state management
 - ✅ RLP encoding/decoding (complete implementation with tests)
 - ✅ Docker support
-- ✅ HTTP server implementation (Zig 0.15 networking APIs)
+- ✅ HTTP server implementation (Zig 0.14.1 networking APIs)
 - ✅ HTTP client for L1 communication (JSON-RPC support)
 - ✅ Conditional transaction submission (EIP-7796 support)
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
@@ -499,7 +499,7 @@ The workflow will fail if:
 
 ### Networking Implementation
 
-The sequencer uses Zig 0.15.2's standard library networking APIs:
+The sequencer uses Zig 0.14.1's standard library networking APIs:
 
 - **HTTP Server**: Built on `std.net.Server` and `std.net.Stream` for accepting JSON-RPC connections
 - **HTTP Client**: Uses `std.net.tcpConnectToAddress` for L1 RPC communication
@@ -508,7 +508,7 @@ The sequencer uses Zig 0.15.2's standard library networking APIs:
 
 ### Custom U256 Implementation
 
-Due to a compiler bug in Zig 0.15.2's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
+Due to a compiler bug in Zig 0.14.x's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
 - Uses two `u128` fields to represent 256-bit values
 - Provides conversion functions to/from native `u256` and byte arrays
 - Includes custom hash and equality functions for HashMap compatibility
@@ -518,11 +518,11 @@ See `src/core/types.zig` for implementation details and rationale.
 
 ## Known Issues & Workarounds
 
-### Zig 0.15.2 HashMap Allocator Bug (RESOLVED)
+### Zig 0.14.x HashMap Allocator Bug (RESOLVED)
 
 **Status**: ✅ **RESOLVED** - Custom U256 implementation workaround implemented
 
-This project encountered a compiler bug in Zig 0.15.2 related to HashMap initialization with native `u256` types as keys. The error manifests as:
+This project encountered a compiler bug in Zig 0.14.x related to HashMap initialization with native `u256` types as keys. The error manifests as:
 ```
 error: access of union field 'pointer' while field 'int' is active
 at std/mem/Allocator.zig:425:45
@@ -545,11 +545,8 @@ See `src/core/types.zig` for detailed comments explaining the implementation.
 
 ### Zig 0.14.x Allocator Bug (Historical)
 
-This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). See **[ZIG_0.14_ALLOCATOR_ERROR.md](ZIG_0.14_ALLOCATOR_ERROR.md)** for detailed explanation and workarounds attempted.
+This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). The issue was resolved by using a custom `U256` implementation instead of native `u256` types.
 
-### Upgrading to Zig 0.15.2
-
-This project has been successfully upgraded to Zig 0.15.2. See **[ZIG_0.15_UPGRADE.md](ZIG_0.15_UPGRADE.md)** for detailed information about the upgrade process, encountered errors, and solutions.
 
 ## License
 

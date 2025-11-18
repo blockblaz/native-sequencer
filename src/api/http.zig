@@ -127,7 +127,7 @@ pub const HttpResponse = struct {
     }
 
     pub fn format(self: *const HttpResponse, allocator: std.mem.Allocator) ![]u8 {
-        var result = std.array_list.Managed(u8).init(allocator);
+        var result = std.ArrayList(u8).init(allocator);
         errdefer result.deinit();
 
         const status_text = switch (self.status_code) {

@@ -315,7 +315,7 @@ pub const Mempool = struct {
     }
 
     pub fn getTopN(self: *Mempool, gas_limit: u64, max_count: usize) ![]core.transaction.Transaction {
-        var result = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
+        var result = std.ArrayList(core.transaction.Transaction).init(self.allocator);
         errdefer result.deinit();
 
         var remaining_gas: u64 = gas_limit;
@@ -362,7 +362,7 @@ pub const Mempool = struct {
         // Check if sender exists
         _ = self.by_sender.get(sender) orelse return &[_]core.transaction.Transaction{};
 
-        var result = std.array_list.Managed(core.transaction.Transaction).init(self.allocator);
+        var result = std.ArrayList(core.transaction.Transaction).init(self.allocator);
         defer result.deinit();
 
         // Scan storage to find all transactions from this sender

@@ -29,9 +29,7 @@ pub const Database = struct {
         defer allocator.free(path_owned);
 
         // Convert path to null-terminated string (like zeam does)
-        // In Zig 0.15.2, use allocSentinel instead of allocPrintZ
-        const path_null = try allocator.allocSentinel(u8, path.len, 0);
-        @memcpy(path_null[0..path.len], path);
+        const path_null = try std.fmt.allocPrintZ(allocator, "{s}", .{path});
         defer allocator.free(path_null);
 
         // Create directory if it doesn't exist

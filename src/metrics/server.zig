@@ -80,7 +80,7 @@ pub const MetricsServer = struct {
         try response.headers.put("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
 
         // Format metrics in Prometheus format
-        var metrics_buffer = std.array_list.Managed(u8).init(self.allocator);
+        var metrics_buffer = std.ArrayList(u8).init(self.allocator);
         defer metrics_buffer.deinit();
 
         try metrics_buffer.writer().print(

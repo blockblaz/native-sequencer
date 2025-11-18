@@ -52,7 +52,7 @@ pub const JsonRpcResponse = struct {
     }
 
     fn serializeResponse(allocator: std.mem.Allocator, response: JsonRpcResponse) ![]u8 {
-        var list = std.array_list.Managed(u8).init(allocator);
+        var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
         try list.writer().writeAll("{\"jsonrpc\":\"2.0\",");

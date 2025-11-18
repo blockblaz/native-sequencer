@@ -2,7 +2,7 @@
     .name = .native_sequencer,
     .version = "0.1.0",
     .fingerprint = 0xf01d1595a0ff6442,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.14.1",
     .dependencies = .{
         .rocksdb = .{
             .url = "https://github.com/Syndica/rocksdb-zig/archive/70137101ad89640e0fc2e5ddbe60a26c522c7ae7.tar.gz",

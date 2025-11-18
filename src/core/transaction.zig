@@ -33,7 +33,7 @@ pub const Transaction = struct {
         return try rlp_module.encodeTransaction(allocator, self);
     }
 
-    fn encodeUint(list: *std.array_list.Managed(u8), value: anytype) !void {
+    fn encodeUint(list: *std.ArrayList(u8), value: anytype) !void {
         var buf: [32]u8 = undefined;
         std.mem.writeInt(u256, &buf, value, .big);
         var start: usize = 0;
