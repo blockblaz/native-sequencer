@@ -7,6 +7,21 @@ const config = @import("../config/root.zig");
 const mev = @import("mev.zig");
 const execution = @import("execution.zig");
 
+fn formatHash(hash: core.types.Hash) []const u8 {
+    // Format hash as hex string for logging
+    const bytes = hash.toBytes();
+    var buffer: [66]u8 = undefined; // "0x" + 64 hex chars
+    buffer[0] = '0';
+    buffer[1] = 'x';
+    // Format each byte as hex
+    for (bytes, 0..) |byte, i| {
+        const hex_chars = "0123456789abcdef";
+        buffer[2 + i * 2] = hex_chars[byte >> 4];
+        buffer[2 + i * 2 + 1] = hex_chars[byte & 0xf];
+    }
+    return buffer[0..66];
+}
+
 pub const Sequencer = struct {
     allocator: std.mem.Allocator,
     config: *const config.Config,
@@ -52,13 +67,14 @@ pub const Sequencer = struct {
 
             // Execute transaction
             const exec_result = self.execution_engine.executeTransaction(tx) catch |err| {
-                std.log.warn("Transaction execution failed: {any}", .{err});
+                std.log.warn("Transaction execution error: {any}", .{err});
                 continue;
             };
 
             // Skip failed transactions
             if (!exec_result.success) {
-                std.log.warn("Transaction execution failed: gas_used={d}", .{exec_result.gas_used});
+                const tx_hash = tx.hash(self.allocator) catch continue;
+                std.log.warn("Transaction execution failed (hash={s}, gas_used={d})", .{ formatHash(tx_hash), exec_result.gas_used });
                 continue;
             }
 

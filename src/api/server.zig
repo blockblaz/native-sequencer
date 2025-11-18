@@ -11,12 +11,12 @@ pub const JsonRpcServer = struct {
     metrics: *metrics.Metrics,
     http_server: http.HttpServer,
 
-    pub fn init(allocator: std.mem.Allocator, addr: std.net.Address, ing: *validation.ingress.Ingress, m: *metrics.Metrics) JsonRpcServer {
+    pub fn init(allocator: std.mem.Allocator, addr: std.net.Address, host: []const u8, port: u16, ing: *validation.ingress.Ingress, m: *metrics.Metrics) JsonRpcServer {
         return .{
             .allocator = allocator,
             .ingress_handler = ing,
             .metrics = m,
-            .http_server = http.HttpServer.init(allocator, addr),
+            .http_server = http.HttpServer.init(allocator, addr, host, port),
         };
     }
 
@@ -36,7 +36,7 @@ pub const JsonRpcServer = struct {
         defer conn_mut.close();
 
         var request = conn_mut.readRequest() catch |err| {
-            std.log.warn("Failed to read request: {any}", .{err});
+            std.log.warn("Failed to read HTTP request: {any}", .{err});
             return;
         };
         defer request.deinit();
@@ -53,7 +53,7 @@ pub const JsonRpcServer = struct {
         }
 
         const json_response = server.handleJsonRpc(request.body) catch |err| {
-            std.log.warn("Failed to handle JSON-RPC: {any}", .{err});
+            std.log.warn("Failed to handle JSON-RPC request (method={s}): {any}", .{ request.method, err });
             const error_response = jsonrpc.JsonRpcResponse.errorResponse(server.allocator, null, jsonrpc.ErrorCode.InternalError, "Internal error") catch return;
             defer server.allocator.free(error_response);
 

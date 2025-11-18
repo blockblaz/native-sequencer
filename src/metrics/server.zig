@@ -9,19 +9,23 @@ pub const MetricsServer = struct {
     address: std.net.Address,
     metrics: *Metrics,
     http_server: http.HttpServer,
+    host: []const u8,
+    port: u16,
 
-    pub fn init(allocator: std.mem.Allocator, address: std.net.Address, metrics: *Metrics) MetricsServer {
+    pub fn init(allocator: std.mem.Allocator, address: std.net.Address, host: []const u8, port: u16, metrics: *Metrics) MetricsServer {
         return .{
             .allocator = allocator,
             .address = address,
             .metrics = metrics,
-            .http_server = http.HttpServer.init(allocator, address),
+            .http_server = http.HttpServer.init(allocator, address, host, port),
+            .host = host,
+            .port = port,
         };
     }
 
     pub fn start(self: *MetricsServer) !void {
         try self.http_server.listen();
-        std.log.info("Metrics server listening on {any}", .{self.address});
+        std.log.info("Metrics server listening on {s}:{d}", .{ self.host, self.port });
 
         while (true) {
             var conn = self.http_server.accept() catch |err| {
