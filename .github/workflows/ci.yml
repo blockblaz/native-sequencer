@@ -52,7 +52,8 @@ jobs:
       
       - name: Build for Linux x86_64
         run: |
-          zig build -Dtarget=x86_64-linux-gnu
+          # Specify glibc 2.38+ for RocksDB compatibility (requires __isoc23_* symbols)
+          zig build -Dtarget=x86_64-linux-gnu.2.38
       
       - name: Verify binary exists
         run: |

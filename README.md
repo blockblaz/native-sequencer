@@ -518,6 +518,20 @@ See `src/core/types.zig` for implementation details and rationale.
 
 ## Known Issues & Workarounds
 
+### Linux Build Requirements
+
+**glibc Version**: The Linux build requires glibc 2.38 or later due to RocksDB dependencies that use ISO C23 compatibility symbols (`__isoc23_*`). When building for Linux, specify the glibc version:
+
+```bash
+zig build -Dtarget=x86_64-linux-gnu.2.38
+```
+
+**CI Compatibility**: GitHub Actions `ubuntu-latest` runners use Ubuntu 22.04 (glibc 2.35), which is insufficient. The CI workflow specifies glibc 2.38 in the build target to ensure compatibility. For local builds on older Linux distributions, you may need to:
+
+1. Use a newer Linux distribution (Ubuntu 24.04+ or equivalent)
+2. Build in a container with glibc 2.38+
+3. Use the Docker build which includes the correct glibc version
+
 ### Zig 0.14.x HashMap Allocator Bug (RESOLVED)
 
 **Status**: ✅ **RESOLVED** - Custom U256 implementation workaround implemented

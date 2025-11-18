@@ -3,6 +3,9 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     _ = b.standardOptimizeOption(.{}); // Available for future use
+    
+    // Note: For Linux builds, specify glibc 2.38+ in the target (e.g., x86_64-linux-gnu.2.38)
+    // This is required for RocksDB compatibility (uses __isoc23_* symbols from glibc 2.38+)
 
     // Build libsecp256k1 static C library from vendor directory
     const libsecp256k1_root = b.addModule("secp256k1_lib", .{
@@ -47,7 +50,9 @@ pub fn build(b: *std.Build) void {
     // Note: RocksDB doesn't support Windows, so we conditionally include it
     const is_windows = target.result.os.tag == .windows;
     if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{});
+        const dep_rocksdb = b.dependency("rocksdb", .{
+            .target = target,
+        });
         sequencer_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
     }
 
@@ -61,7 +66,9 @@ pub fn build(b: *std.Build) void {
     lib.linkLibrary(libsecp256k1);
     // Add RocksDB module and link library (only on non-Windows)
     if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{});
+        const dep_rocksdb = b.dependency("rocksdb", .{
+            .target = target,
+        });
         lib.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
         lib.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         lib.linkLibCpp(); // RocksDB requires C++ standard library
@@ -89,7 +96,9 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(libsecp256k1);
     // Add RocksDB module and link library (only on non-Windows)
     if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{});
+        const dep_rocksdb = b.dependency("rocksdb", .{
+            .target = target,
+        });
         exe.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
         exe.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         exe.linkLibCpp(); // RocksDB requires C++ standard library
@@ -126,7 +135,9 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibrary(libsecp256k1);
     // Add RocksDB module and link library (only on non-Windows)
     if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{});
+        const dep_rocksdb = b.dependency("rocksdb", .{
+            .target = target,
+        });
         unit_tests.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
         unit_tests.linkLibrary(dep_rocksdb.artifact("rocksdb"));
         unit_tests.linkLibCpp(); // RocksDB requires C++ standard library
