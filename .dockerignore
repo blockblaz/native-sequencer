@@ -1,0 +1,82 @@
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Zig build artifacts
+.zig-cache/
+zig-out/
+zig-cache/
+
+# Compiled binaries
+sequencer
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Build directories
+build/
+dist/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Runtime files (will be created in container)
+mempool.wal
+state.db
+*.db
+
+# Test artifacts
+test-results/
+*.test
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Documentation builds
+docs/_build/
+site/
+
+# Backup files
+*.bak
+*.backup
+
+# Documentation files (not needed in container)
+*.md
+!README.md
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Other
+*.zip
+*.tar.gz
+

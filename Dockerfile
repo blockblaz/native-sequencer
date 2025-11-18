@@ -61,13 +61,34 @@ USER sequencer
 EXPOSE 8545 9090
 
 # Set environment variables with defaults
+# API Configuration
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8545
-ENV METRICS_PORT=9090
-ENV L1_RPC_URL=http://localhost:8545
+
+# L1 Configuration
+ENV L1_RPC_URL=http://host.docker.internal:8545
 ENV L1_CHAIN_ID=1
+ENV SEQUENCER_KEY=
+
+# Sequencer Configuration
+ENV BATCH_SIZE_LIMIT=1000
+ENV BLOCK_GAS_LIMIT=30000000
+ENV BATCH_INTERVAL_MS=2000
+
+# Mempool Configuration
+ENV MEMPOOL_MAX_SIZE=100000
 ENV MEMPOOL_WAL_PATH=/app/data/mempool.wal
+
+# State Configuration
 ENV STATE_DB_PATH=/app/data/state.db
+
+# Observability
+ENV METRICS_PORT=9090
+ENV ENABLE_TRACING=false
+
+# Operator Controls
+ENV EMERGENCY_HALT=false
+ENV RATE_LIMIT_PER_SECOND=1000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
