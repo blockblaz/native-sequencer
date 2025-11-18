@@ -36,16 +36,16 @@ pub const Config = struct {
         if (std.process.getEnvVarOwned(allocator, "API_HOST")) |host| {
             config.api_host = host;
         } else |_| {}
-        
+
         if (std.process.getEnvVarOwned(allocator, "API_PORT")) |port_str| {
             config.api_port = try std.fmt.parseInt(u16, port_str, 10);
             allocator.free(port_str);
         } else |_| {}
-        
+
         if (std.process.getEnvVarOwned(allocator, "L1_RPC_URL")) |url| {
             config.l1_rpc_url = url;
         } else |_| {}
-        
+
         if (std.process.getEnvVarOwned(allocator, "SEQUENCER_KEY")) |key_hex| {
             // Parse hex key (TODO: implement parsing)
             allocator.free(key_hex);
