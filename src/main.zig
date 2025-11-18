@@ -49,10 +49,22 @@ pub fn main() !void {
     };
 
     if (use_persistence) {
-        // Open RocksDB database
-        state_db = try lib.persistence.rocksdb.Database.open(allocator, cfg.state_db_path);
-        std.log.info("Initializing state manager with RocksDB persistence at {s}", .{cfg.state_db_path});
-        state_manager = try lib.state.StateManager.initWithPersistence(allocator, &state_db.?);
+        // Open RocksDB database (not supported on Windows)
+        state_db = lib.persistence.rocksdb.Database.open(allocator, cfg.state_db_path) catch |err| {
+            if (err == error.UnsupportedPlatform) {
+                std.log.warn("RocksDB persistence not supported on Windows, falling back to in-memory state", .{});
+                state_db = null;
+            } else {
+                return err;
+            }
+        };
+        if (state_db) |*db| {
+            std.log.info("Initializing state manager with RocksDB persistence at {s}", .{cfg.state_db_path});
+            state_manager = try lib.state.StateManager.initWithPersistence(allocator, db);
+        } else {
+            // Use in-memory state manager (Windows or error case)
+            state_manager = lib.state.StateManager.init(allocator);
+        }
     } else {
         // Use in-memory state manager
         state_manager = lib.state.StateManager.init(allocator);

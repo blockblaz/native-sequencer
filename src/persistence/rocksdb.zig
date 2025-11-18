@@ -1,13 +1,30 @@
 // RocksDB persistence layer for Native Sequencer
-//
-// This module provides a high-level interface to RocksDB for:
-// - State persistence (nonces, balances, receipts)
-// - Mempool checkpoints
-// - Block metadata storage
+// Note: RocksDB is not available on Windows
 
 const std = @import("std");
-const rocksdb = @import("rocksdb");
+const builtin = @import("builtin");
 const core = @import("../core/root.zig");
+
+// Conditionally import rocksdb only on non-Windows platforms
+const rocksdb = if (builtin.os.tag == .windows) struct {
+    pub const DB = struct {};
+    pub const ColumnFamilyHandle = struct {};
+    pub const Data = struct {
+        data: []const u8,
+        pub fn deinit(_: *@This()) void {}
+    };
+    pub const DBOptions = struct {
+        create_if_missing: bool = true,
+        create_missing_column_families: bool = true,
+    };
+    pub const ColumnFamilyDescription = struct {
+        name: []const u8,
+        options: struct {},
+    };
+    pub const ColumnFamily = struct {
+        handle: ColumnFamilyHandle,
+    };
+} else @import("rocksdb");
 
 pub const RocksDBError = error{
     DatabaseOpenFailed,
@@ -15,6 +32,7 @@ pub const RocksDBError = error{
     SerializationFailed,
     DeserializationFailed,
     KeyNotFound,
+    UnsupportedPlatform, // Windows is not supported
 };
 
 pub const Database = struct {
@@ -24,7 +42,11 @@ pub const Database = struct {
     default_cf_handle: rocksdb.ColumnFamilyHandle, // Store default column family handle
 
     /// Open or create a RocksDB database
+    /// Note: Not supported on Windows - returns error.UnsupportedPlatform
     pub fn open(allocator: std.mem.Allocator, path: []const u8) !Database {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const path_owned = try allocator.dupe(u8, path);
         defer allocator.free(path_owned);
 
@@ -77,12 +99,17 @@ pub const Database = struct {
 
     /// Close the database
     pub fn close(self: *Database) void {
-        self.db.deinit();
+        if (builtin.os.tag != .windows) {
+            self.db.deinit();
+        }
         self.allocator.free(self.path);
     }
 
     /// Put a key-value pair
     pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         var err_str: ?rocksdb.Data = null;
         self.db.put(self.default_cf_handle, key, value, &err_str) catch |err| {
             std.log.err("Failed to put key-value pair: {any}", .{err});
@@ -92,6 +119,9 @@ pub const Database = struct {
 
     /// Get a value by key
     pub fn get(self: *Database, key: []const u8) !?rocksdb.Data {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         var err_str: ?rocksdb.Data = null;
         const value = self.db.get(self.default_cf_handle, key, &err_str) catch |err| {
             std.log.err("Failed to get value for key: {any}", .{err});
@@ -102,6 +132,9 @@ pub const Database = struct {
 
     /// Delete a key-value pair
     pub fn delete(self: *Database, key: []const u8) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         var err_str: ?rocksdb.Data = null;
         self.db.delete(self.default_cf_handle, key, &err_str) catch |err| {
             std.log.err("Failed to delete key: {any}", .{err});
@@ -111,6 +144,9 @@ pub const Database = struct {
 
     /// Check if a key exists
     pub fn exists(self: *Database, key: []const u8) !bool {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const value = try self.get(key);
         if (value) |v| {
             v.deinit();
@@ -121,6 +157,9 @@ pub const Database = struct {
 
     /// Store an address -> u64 mapping (for nonces)
     pub fn putNonce(self: *Database, address: core.types.Address, nonce: u64) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.addressToKey("nonce:", address);
         defer self.allocator.free(key);
 
@@ -131,6 +170,9 @@ pub const Database = struct {
 
     /// Get a nonce for an address
     pub fn getNonce(self: *Database, address: core.types.Address) !?u64 {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.addressToKey("nonce:", address);
         defer self.allocator.free(key);
 
@@ -150,6 +192,9 @@ pub const Database = struct {
 
     /// Store an address -> u256 mapping (for balances)
     pub fn putBalance(self: *Database, address: core.types.Address, balance: u256) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.addressToKey("balance:", address);
         defer self.allocator.free(key);
 
@@ -160,6 +205,9 @@ pub const Database = struct {
 
     /// Get a balance for an address
     pub fn getBalance(self: *Database, address: core.types.Address) !?u256 {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.addressToKey("balance:", address);
         defer self.allocator.free(key);
 
@@ -179,6 +227,9 @@ pub const Database = struct {
 
     /// Store a receipt by transaction hash
     pub fn putReceipt(self: *Database, tx_hash: core.types.Hash, receipt: core.receipt.Receipt) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.hashToKey("receipt:", tx_hash);
         defer self.allocator.free(key);
 
@@ -191,6 +242,9 @@ pub const Database = struct {
 
     /// Get a receipt by transaction hash
     pub fn getReceipt(self: *Database, tx_hash: core.types.Hash) !?core.receipt.Receipt {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = try self.hashToKey("receipt:", tx_hash);
         defer self.allocator.free(key);
 
@@ -204,6 +258,9 @@ pub const Database = struct {
 
     /// Store current block number
     pub fn putBlockNumber(self: *Database, block_number: u64) !void {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = "block_number";
         var value_buf: [8]u8 = undefined;
         std.mem.writeInt(u64, &value_buf, block_number, .big);
@@ -212,6 +269,9 @@ pub const Database = struct {
 
     /// Get current block number
     pub fn getBlockNumber(self: *Database) !?u64 {
+        if (builtin.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
         const key = "block_number";
         const value_opt = try self.get(key);
         defer if (value_opt) |v| v.deinit();
