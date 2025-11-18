@@ -94,8 +94,8 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
 fn metricsLoop(m: *lib.metrics.Metrics, port: u16) void {
     // Simplified metrics server - in production use proper async networking
     std.log.info("Metrics server would listen on port {d}", .{port});
-    std.log.warn("Metrics server implementation incomplete - networking API needs proper Zig 0.14 implementation", .{});
-    // TODO: Implement proper metrics server using Zig 0.14 networking APIs
+    std.log.warn("Metrics server implementation incomplete - networking API needs proper Zig 0.15 implementation", .{});
+    // TODO: Implement proper metrics server using Zig 0.15 networking APIs
     // For now, just sleep to keep thread alive
     while (true) {
         std.Thread.sleep(1 * std.time.ns_per_s);

@@ -101,7 +101,7 @@ pub const JsonRpcServer = struct {
             return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing params");
         };
 
-        // In Zig 0.14, std.json.Value is a union, so we need to use switch
+        // In Zig 0.15, std.json.Value is a union, so we need to use switch
         const params_array = switch (params) {
             .array => |arr| arr,
             else => {

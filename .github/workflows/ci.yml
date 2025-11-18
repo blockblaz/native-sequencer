@@ -161,6 +161,6 @@ jobs:
         run: |
           # Test that the image can start (it will exit with error due to missing config, but that's expected)
           docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.tag }} || true
-          # Verify the binary exists and is executable
-          docker run --rm --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.tag }} ls -la /app/sequencer || exit 1
+          # Verify the binary exists and is executable (override CMD to run ls instead)
+          docker run --rm --entrypoint ls --platform ${{ matrix.platform }} native-sequencer:test-${{ matrix.tag }} -la /app/sequencer || exit 1
 

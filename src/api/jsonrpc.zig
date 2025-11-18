@@ -10,7 +10,7 @@ pub const JsonRpcRequest = struct {
     id: ?std.json.Value = null,
 
     pub fn parse(allocator: std.mem.Allocator, json_str: []const u8) !JsonRpcRequest {
-        // Use parseFromSliceLeaky for Zig 0.14 - returns owned value
+        // Use parseFromSliceLeaky for Zig 0.15 - returns owned value
         // We need to handle the parsed value carefully since it owns the strings
         const parsed = try std.json.parseFromSliceLeaky(
             JsonRpcRequest,
