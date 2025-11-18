@@ -50,4 +50,3 @@ pub const Config = struct {
         return config;
     }
 };
-

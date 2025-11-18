@@ -72,4 +72,3 @@ pub fn functionSelector(signature: []const u8) [4]u8 {
 pub fn eventSignature(signature: []const u8) types.Hash {
     return hash(signature);
 }
-

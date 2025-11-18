@@ -15,4 +15,3 @@ pub const Receipt = struct {
         data: []const u8,
     };
 };
-

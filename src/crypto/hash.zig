@@ -6,4 +6,3 @@ const keccak = @import("keccak.zig");
 pub fn keccak256(data: []const u8) types.Hash {
     return keccak.hash(data);
 }
-

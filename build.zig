@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("vendor/zig-eth-secp256k1/secp256k1_wrapper.zig"),
         .target = target,
     });
-    
+
     const libsecp256k1 = b.addLibrary(.{
         .name = "secp256k1",
         .linkage = .static,
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
     // Link secp256k1 library
     exe.linkLibrary(libsecp256k1);
     exe.linkLibC();
-    
+
     b.installArtifact(exe);
 
     // Run step
@@ -98,10 +98,34 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    // Lint
-    const lint_cmd = b.addSystemCommand(&.{ "zig", "fmt", "--check", "src" });
-    const lint_step = b.step("lint", "Run lint (zig fmt --check)");
-    lint_step.dependOn(&lint_cmd.step);
+    // Linting steps
+    // Format check
+    const fmt_check_cmd = b.addSystemCommand(&.{ "zig", "fmt", "--check", "src", "build.zig" });
+    const lint_step = b.step("lint", "Run all linting checks (format + AST)");
+    lint_step.dependOn(&fmt_check_cmd.step);
+
+    // Format fix
+    const fmt_fix_cmd = b.addSystemCommand(&.{ "zig", "fmt", "src", "build.zig" });
+    const fmt_fix_step = b.step("fmt", "Format source code");
+    fmt_fix_step.dependOn(&fmt_fix_cmd.step);
+
+    // AST check for main source files
+    const ast_check_main = b.addSystemCommand(&.{ "zig", "ast-check", "src/main.zig" });
+    lint_step.dependOn(&ast_check_main.step);
+
+    // AST check for core modules
+    const ast_check_core = b.addSystemCommand(&.{ "zig", "ast-check", "src/core/root.zig" });
+    lint_step.dependOn(&ast_check_core.step);
+
+    // AST check for API modules
+    const ast_check_api = b.addSystemCommand(&.{ "zig", "ast-check", "src/api/root.zig" });
+    lint_step.dependOn(&ast_check_api.step);
+
+    // AST check for L1 client
+    const ast_check_l1 = b.addSystemCommand(&.{ "zig", "ast-check", "src/l1/client.zig" });
+    lint_step.dependOn(&ast_check_l1.step);
+
+    // Lint-fix: format code automatically
+    const lint_fix_step = b.step("lint-fix", "Run lint-fix (format code)");
+    lint_fix_step.dependOn(&fmt_fix_cmd.step);
 }
-
-

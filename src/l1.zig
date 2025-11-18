@@ -83,4 +83,3 @@ pub const L1Client = struct {
         return error.NotImplemented;
     }
 };
-

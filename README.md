@@ -85,8 +85,14 @@ zig build run
 # Run tests
 zig build test
 
-# Run linter
+# Run linter (format check + AST checks)
 zig build lint
+
+# Format code automatically
+zig build fmt
+
+# Run lint-fix (alias for fmt)
+zig build lint-fix
 ```
 
 The build output will be in `zig-out/bin/sequencer`.
@@ -429,6 +435,61 @@ This is an initial implementation. Production use requires:
 - ⏳ Complete MEV bundle detection
 - ⏳ Proper error handling and retry logic
 - ⏳ Comprehensive testing
+
+## Linting
+
+The repository includes comprehensive linting checks to ensure code quality:
+
+- **Format Check**: Validates code formatting using `zig fmt --check`
+- **AST Checks**: Validates syntax and type correctness using `zig ast-check` for key modules
+- **Format Fix**: Automatically formats code using `zig fmt`
+
+### Linting Commands
+
+```bash
+# Run all linting checks (format + AST)
+# Exit code 1 if formatting issues are found
+zig build lint
+
+# Format code automatically (fixes formatting issues)
+zig build fmt
+
+# Run lint-fix (alias for fmt)
+zig build lint-fix
+```
+
+**Note**: If `zig build lint` fails, run `zig build fmt` to automatically fix formatting issues, then commit the changes.
+
+### CI/CD Integration
+
+A comprehensive GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
+- Push to main/master/develop branches
+- Pull requests targeting main/master/develop branches
+
+The CI pipeline includes:
+
+#### Linting & Testing
+- **Code formatting validation** (`zig fmt --check`)
+- **AST syntax checks** for key modules (`zig ast-check`)
+- **Unit tests** (`zig build test`)
+
+#### Multi-Platform Builds
+- **Linux (x86_64)**: Builds and verifies binary for Linux
+- **macOS (x86_64)**: Builds and verifies binary for Intel Macs
+- **macOS (ARM64)**: Builds and verifies binary for Apple Silicon
+- **Windows (x86_64)**: Builds and verifies binary for Windows
+
+#### Docker Build Validation
+- **Multi-architecture Docker builds**: Tests Docker image builds for both `linux/amd64` and `linux/arm64`
+- **Image verification**: Validates Docker image structure and metadata
+- **Runtime testing**: Verifies that the Docker image can start and contains the expected binary
+
+The workflow will fail if:
+- Code is not properly formatted
+- AST checks reveal syntax or type errors
+- Unit tests fail
+- Build fails on any platform
+- Docker image build or validation fails
 
 ## Technical Details
 

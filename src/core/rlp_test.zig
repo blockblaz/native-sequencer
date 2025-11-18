@@ -212,7 +212,7 @@ test "RLP encode and decode transaction" {
         .gas_limit = 21000,
         .to = null,
         .value = 1000000000000000000,
-        .data = &[_]u8{0x12, 0x34, 0x56},
+        .data = &[_]u8{ 0x12, 0x34, 0x56 },
         .v = 27,
         .r = [_]u8{0x01} ** 32,
         .s = [_]u8{0x02} ** 32,
@@ -325,4 +325,3 @@ test "RLP decode invalid data" {
     // Truncated data
     try testing.expectError(error.InvalidRLP, rlp.decodeBytes(allocator, &[_]u8{0x85})); // Says 5 bytes but only 1 byte
 }
-

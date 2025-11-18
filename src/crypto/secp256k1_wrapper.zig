@@ -74,7 +74,7 @@ pub const Signature = types.Signature;
 /// Sign a message hash with a private key
 pub fn sign(message_hash: types.Hash, private_key: PrivateKey) !Signature {
     var ctx = try secp.Secp256k1.init();
-    
+
     const hash_bytes = types.hashToBytes(message_hash);
     const sig_bytes = try ctx.sign(hash_bytes, private_key.bytes);
 
@@ -114,4 +114,3 @@ pub fn verify(message_hash: types.Hash, signature: Signature, public_key: Public
     return std.mem.eql(u8, &public_key.x, &recovered_pubkey.x) and
         std.mem.eql(u8, &public_key.y, &recovered_pubkey.y);
 }
-
