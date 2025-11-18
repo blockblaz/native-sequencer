@@ -10,3 +10,4 @@ pub const state = @import("state/root.zig");
 pub const api = @import("api/root.zig");
 pub const metrics = @import("metrics/root.zig");
 pub const config = @import("config/root.zig");
+pub const persistence = @import("persistence/root.zig");

@@ -32,8 +32,35 @@ pub fn main() !void {
 
     // Initialize components
     std.log.info("Initializing sequencer components...", .{});
-    var state_manager = lib.state.StateManager.init(allocator);
+
+    // Initialize RocksDB if state_db_path is configured
+    var state_db: ?lib.persistence.rocksdb.Database = null;
+    var state_manager: lib.state.StateManager = undefined;
+
+    // Check if STATE_DB_PATH is set or if default path should be used
+    const use_persistence = blk: {
+        if (std.process.getEnvVarOwned(allocator, "STATE_DB_PATH")) |env_path| {
+            defer allocator.free(env_path);
+            break :blk true;
+        } else |_| {
+            // Use default path
+            break :blk true;
+        }
+    };
+
+    if (use_persistence) {
+        // Open RocksDB database
+        state_db = try lib.persistence.rocksdb.Database.open(allocator, cfg.state_db_path);
+        std.log.info("Initializing state manager with RocksDB persistence at {s}", .{cfg.state_db_path});
+        state_manager = try lib.state.StateManager.initWithPersistence(allocator, &state_db.?);
+    } else {
+        // Use in-memory state manager
+        state_manager = lib.state.StateManager.init(allocator);
+    }
     defer state_manager.deinit();
+    if (state_db) |*db| {
+        defer db.close();
+    }
 
     var mp = try lib.mempool.Mempool.init(allocator, &cfg);
     defer mp.deinit();

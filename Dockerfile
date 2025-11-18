@@ -40,7 +40,22 @@ COPY build.zig build.zig.zon ./
 COPY src ./src
 COPY vendor ./vendor
 
-# Build the sequencer
+# Fetch dependencies by attempting a build (this will download rocksdb)
+# The build will fail due to RocksDB compatibility issues, but dependencies will be downloaded
+RUN zig build -Doptimize=ReleaseSafe 2>&1 || true
+
+# Patch RocksDB library's build.zig for Zig 0.15.2 compatibility
+# Fix addTest call - remove .target and .optimize fields, fix callconv syntax
+RUN find /root/.cache/zig/p -name "rocksdb-*" -type d | head -1 | xargs -I {} sh -c ' \
+    if [ -f {}/build.zig ]; then \
+        sed -i "s/.target = target,//g" {}/build.zig; \
+        sed -i "s/.optimize = optimize,//g" {}/build.zig; \
+    fi && \
+    if [ -f {}/src/data.zig ]; then \
+        sed -i "s/callconv(.C)/callconv(.c)/g" {}/src/data.zig; \
+    fi'
+
+# Now build the sequencer (should succeed after patching)
 RUN zig build -Doptimize=ReleaseSafe
 
 # Stage 2: Runtime stage

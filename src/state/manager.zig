@@ -1,5 +1,6 @@
 const std = @import("std");
 const core = @import("../core/root.zig");
+const persistence = @import("../persistence/root.zig");
 
 // Custom hash context for U256 struct (two u128 fields)
 // This avoids the allocator bug with native u256
@@ -27,14 +28,49 @@ pub const StateManager = struct {
     balances: std.HashMap(core.types.Address, u256, AddressContext, std.hash_map.default_max_load_percentage),
     receipts: std.HashMap(core.types.Hash, core.receipt.Receipt, HashContext, std.hash_map.default_max_load_percentage),
     current_block_number: u64 = 0,
+    db: ?*persistence.rocksdb.Database = null,
+    use_persistence: bool = false,
 
+    /// Initialize StateManager with optional RocksDB persistence
     pub fn init(allocator: std.mem.Allocator) StateManager {
         return .{
             .allocator = allocator,
             .nonces = std.HashMap(core.types.Address, u64, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
             .balances = std.HashMap(core.types.Address, u256, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
             .receipts = std.HashMap(core.types.Hash, core.receipt.Receipt, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .db = null,
+            .use_persistence = false,
         };
+    }
+
+    /// Initialize StateManager with RocksDB persistence
+    pub fn initWithPersistence(allocator: std.mem.Allocator, db: *persistence.rocksdb.Database) !StateManager {
+        var sm = init(allocator);
+        sm.db = db;
+        sm.use_persistence = true;
+
+        // Load persisted state from database
+        try sm.loadFromDatabase();
+
+        return sm;
+    }
+
+    /// Load state from RocksDB database
+    fn loadFromDatabase(self: *StateManager) !void {
+        if (self.db == null) return;
+
+        const db = self.db.?;
+
+        // Load current block number
+        if (try db.getBlockNumber()) |block_num| {
+            self.current_block_number = block_num;
+            std.log.info("Loaded block number from database: {d}", .{block_num});
+        }
+
+        // Note: Loading all nonces/balances/receipts into memory would be expensive
+        // For now, we load on-demand. In production, consider using iterators or
+        // loading only frequently accessed data
+        std.log.info("State manager initialized with RocksDB persistence", .{});
     }
 
     pub fn deinit(self: *StateManager) void {
@@ -51,21 +87,78 @@ pub const StateManager = struct {
         self.receipts.deinit();
     }
 
-    pub fn getNonce(self: *const StateManager, address: core.types.Address) !u64 {
-        return self.nonces.get(address) orelse 0;
+    pub fn getNonce(self: *StateManager, address: core.types.Address) !u64 {
+        // Check in-memory cache first
+        if (self.nonces.get(address)) |nonce| {
+            return nonce;
+        }
+
+        // If using persistence, try to load from database
+        if (self.use_persistence) {
+            if (self.db) |db| {
+                if (try db.getNonce(address)) |nonce| {
+                    // Cache in memory
+                    try self.nonces.put(address, nonce);
+                    return nonce;
+                }
+            }
+        }
+
+        // Default to 0 for new addresses
+        try self.nonces.put(address, 0);
+        return 0;
     }
 
-    pub fn getBalance(self: *const StateManager, address: core.types.Address) !u256 {
-        return self.balances.get(address) orelse 0;
+    pub fn getBalance(self: *StateManager, address: core.types.Address) !u256 {
+        // Check in-memory cache first
+        if (self.balances.get(address)) |balance| {
+            return balance;
+        }
+
+        // If using persistence, try to load from database
+        if (self.use_persistence) {
+            if (self.db) |db| {
+                if (try db.getBalance(address)) |balance| {
+                    // Cache in memory
+                    try self.balances.put(address, balance);
+                    return balance;
+                }
+            }
+        }
+
+        // Default to 0 for new addresses
+        try self.balances.put(address, 0);
+        return 0;
     }
 
     pub fn setBalance(self: *StateManager, address: core.types.Address, balance: u256) !void {
+        // Update in-memory cache
         try self.balances.put(address, balance);
+
+        // Persist to database if enabled
+        if (self.use_persistence) {
+            if (self.db) |db| {
+                try db.putBalance(address, balance);
+            }
+        }
     }
 
     pub fn incrementNonce(self: *StateManager, address: core.types.Address) !void {
-        const current = self.getNonce(address) catch 0;
-        try self.nonces.put(address, current + 1);
+        const current = try self.getNonce(address);
+        const new_nonce = current + 1;
+        try self.setNonce(address, new_nonce);
+    }
+
+    pub fn setNonce(self: *StateManager, address: core.types.Address, nonce: u64) !void {
+        // Update in-memory cache
+        try self.nonces.put(address, nonce);
+
+        // Persist to database if enabled
+        if (self.use_persistence) {
+            if (self.db) |db| {
+                try db.putNonce(address, nonce);
+            }
+        }
     }
 
     pub fn applyTransaction(self: *StateManager, tx: core.transaction.Transaction, gas_used: u64) !core.receipt.Receipt {
@@ -110,7 +203,13 @@ pub const StateManager = struct {
     }
 
     pub fn finalizeBlock(self: *StateManager, block: core.block.Block) !void {
-        self.current_block_number = block.number;
-        // In production, update state root, receipts root, etc.
+        self.current_block_number = block.number + 1;
+
+        // Persist block number to database if enabled
+        if (self.use_persistence) {
+            if (self.db) |db| {
+                try db.putBlockNumber(self.current_block_number);
+            }
+        }
     }
 };

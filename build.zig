@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
     });
     sequencer_module.addImport("secp256k1", secp256k1_mod);
 
+    // Add RocksDB dependency (using Syndica/rocksdb-zig like zeam)
+    const dep_rocksdb = b.dependency("rocksdb", .{});
+    sequencer_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+
     // Library
     const lib = b.addLibrary(.{
         .name = "native-sequencer",
@@ -52,6 +56,8 @@ pub fn build(b: *std.Build) void {
     });
     // Link secp256k1 library
     lib.linkLibrary(libsecp256k1);
+    // Add RocksDB module
+    lib.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
     lib.linkLibC();
     b.installArtifact(lib);
 
@@ -68,6 +74,10 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     exe.linkLibrary(libsecp256k1);
+    // Add RocksDB module
+    exe.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    // Link RocksDB library artifact
+    exe.linkLibrary(dep_rocksdb.artifact("rocksdb"));
     exe.linkLibC();
 
     b.installArtifact(exe);
@@ -93,6 +103,10 @@ pub fn build(b: *std.Build) void {
     unit_tests.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     unit_tests.linkLibrary(libsecp256k1);
+    // Add RocksDB module
+    unit_tests.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    // Link RocksDB library artifact
+    unit_tests.linkLibrary(dep_rocksdb.artifact("rocksdb"));
     unit_tests.linkLibC();
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
