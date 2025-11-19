@@ -173,7 +173,7 @@ pub fn verifySignature(tx: *const transaction.Transaction) !bool {
     };
 
     // Step 7: Compare addresses (u256 comparison)
-        const addresses_match = recovered_address == expected_sender;
+    const addresses_match = recovered_address == expected_sender;
     if (!addresses_match) {
         std.log.debug("Recovered address does not match expected sender", .{});
     }
