@@ -36,7 +36,7 @@ pub const BlockSync = struct {
     /// Sync block to L2 geth via engine_newPayload
     pub fn syncBlock(self: *Self, block: *const block_module.Block) !engine_api.PayloadStatus {
         std.log.info("[BlockSync] Syncing block #{d} to L2 geth", .{block.number});
-        
+
         // Submit block to L2 geth
         const status = try self.engine_client.newPayload(block);
 
@@ -44,7 +44,7 @@ pub const BlockSync = struct {
         if (std.mem.eql(u8, status.status, "VALID")) {
             const block_hash = block.hash();
             self.head_block_hash = block_hash;
-            
+
             std.log.info("[BlockSync] Block #{d} accepted, updating fork choice", .{block.number});
 
             // Update fork choice state
@@ -62,14 +62,14 @@ pub const BlockSync = struct {
     /// Update fork choice state in L2 geth
     pub fn updateForkChoice(self: *Self, head_hash: types.Hash, safe_hash: types.Hash, finalized_hash: types.Hash) !engine_api.ForkChoiceUpdateResponse {
         std.log.info("[BlockSync] Updating fork choice state", .{});
-        
+
         const response = try self.engine_client.forkchoiceUpdated(head_hash, safe_hash, finalized_hash);
 
         // Update local fork choice state
         self.head_block_hash = head_hash;
         self.safe_block_hash = safe_hash;
         self.finalized_block_hash = finalized_hash;
-        
+
         std.log.info("[BlockSync] Fork choice updated successfully", .{});
 
         return response;

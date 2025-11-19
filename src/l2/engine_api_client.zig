@@ -44,14 +44,14 @@ pub const EngineApiClient = struct {
         const block_hash = block.hash();
         const block_hash_hex = try self.hashToHex(block_hash);
         defer self.allocator.free(block_hash_hex);
-        
+
         std.log.info("[EngineAPI] Calling engine_newPayload for block #{d} (hash: {s}, {d} txs, {d} gas used)", .{
             block.number,
             block_hash_hex,
             block.transactions.len,
             block.gas_used,
         });
-        
+
         // Convert block to Engine API payload format
         const payload = try self.blockToPayload(block);
         defer self.allocator.free(payload.transactions);
@@ -115,27 +115,27 @@ pub const EngineApiClient = struct {
             .latest_valid_hash = parsed.result.latestValidHash,
             .validation_error = parsed.result.validationError,
         };
-        
+
         std.log.info("[EngineAPI] engine_newPayload response for block #{d}: status={s}", .{
             block.number,
             status.status,
         });
-        
+
         if (status.latest_valid_hash) |hash| {
             std.log.info("[EngineAPI] Latest valid hash: {s}", .{hash});
         }
-        
+
         if (status.validation_error) |err| {
             std.log.err("[EngineAPI] Validation error for block #{d}: {s}", .{ block.number, err });
         }
-        
+
         return status;
     }
 
     /// Get payload from L2 geth via engine_getPayload
     pub fn getPayload(self: *Self, payload_id: []const u8) !struct { block_hash: types.Hash, block_number: u64 } {
         std.log.info("[EngineAPI] Calling engine_getPayload with payload_id: {s}", .{payload_id});
-        
+
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
 
@@ -167,7 +167,7 @@ pub const EngineApiClient = struct {
 
         const block_hash_hex = try self.hashToHex(block_hash);
         defer self.allocator.free(block_hash_hex);
-        
+
         std.log.info("[EngineAPI] engine_getPayload response: block_hash={s}, block_number={d}", .{
             block_hash_hex,
             block_number,
@@ -187,13 +187,13 @@ pub const EngineApiClient = struct {
         defer self.allocator.free(safe_hex);
         const finalized_hex = try self.hashToHex(finalized_block_hash);
         defer self.allocator.free(finalized_hex);
-        
+
         std.log.info("[EngineAPI] Calling engine_forkchoiceUpdated: head={s}, safe={s}, finalized={s}", .{
             head_hex,
             safe_hex,
             finalized_hex,
         });
-        
+
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
 
@@ -243,23 +243,23 @@ pub const EngineApiClient = struct {
             },
             .payload_id = parsed.result.payloadId,
         };
-        
+
         std.log.info("[EngineAPI] engine_forkchoiceUpdated response: status={s}", .{
             response.payload_status.status,
         });
-        
+
         if (response.payload_id) |pid| {
             std.log.info("[EngineAPI] Payload ID: {s}", .{pid});
         }
-        
+
         if (response.payload_status.latest_valid_hash) |hash| {
             std.log.info("[EngineAPI] Latest valid hash: {s}", .{hash});
         }
-        
+
         if (response.payload_status.validation_error) |err| {
             std.log.err("[EngineAPI] Fork choice validation error: {s}", .{err});
         }
-        
+
         return response;
     }
 
@@ -312,7 +312,7 @@ pub const EngineApiClient = struct {
     /// Call JSON-RPC endpoint
     fn callRpc(self: *Self, method: []const u8, params: std.json.Value) ![]u8 {
         const start_time = std.time.nanoTimestamp();
-        
+
         // Parse URL
         const url_parts = try self.parseUrl(self.l2_rpc_url);
         const host = url_parts.host;
@@ -327,7 +327,7 @@ pub const EngineApiClient = struct {
             return err;
         };
         defer stream.close();
-        
+
         std.log.debug("[EngineAPI] Connected to {s}:{d}", .{ host, port });
 
         // Build JSON-RPC request
@@ -378,7 +378,7 @@ pub const EngineApiClient = struct {
             return error.InvalidResponse;
         };
         const json_body = response[body_start + 4 ..];
-        
+
         const elapsed_ms = (@as(f64, @floatFromInt(std.time.nanoTimestamp() - start_time)) / 1_000_000.0);
         std.log.debug("[EngineAPI] {s} completed in {d:.2}ms, response size: {d} bytes", .{
             method,
