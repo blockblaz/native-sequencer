@@ -25,26 +25,6 @@ fn compareQueueEntry(_: void, a: QueueEntry, b: QueueEntry) std.math.Order {
     return .eq;
 }
 
-// Custom hash context for U256 struct (two u128 fields)
-// This avoids the allocator bug with native u256
-const HashContext = struct {
-    pub fn hash(_: @This(), key: core.types.Hash) u64 {
-        return key.hash();
-    }
-    pub fn eql(_: @This(), a: core.types.Hash, b: core.types.Hash) bool {
-        return a.eql(b);
-    }
-};
-
-const AddressContext = struct {
-    pub fn hash(_: @This(), key: core.types.Address) u64 {
-        return key.hash();
-    }
-    pub fn eql(_: @This(), a: core.types.Address, b: core.types.Address) bool {
-        return a.eql(b);
-    }
-};
-
 // Custom transaction storage that avoids allocating arrays
 // Uses length-prefixed storage: each transaction is stored as [4-byte length][data]
 // This avoids needing a separate offsets array
@@ -159,35 +139,32 @@ pub const Mempool = struct {
     // Store transactions in custom storage (avoids HashMap/ArrayList with slices)
     storage: TransactionStorage,
     // HashMap stores hash -> index (usize, not a slice)
-    // Use custom context for U256 struct to avoid allocator bug
-    by_hash: std.HashMap(core.types.Hash, usize, HashContext, std.hash_map.default_max_load_percentage),
+    by_hash: std.HashMap(core.types.Hash, usize, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
     // Store metadata separately (hash -> metadata)
-    metadata: std.HashMap(core.types.Hash, EntryMetadata, HashContext, std.hash_map.default_max_load_percentage),
+    metadata: std.HashMap(core.types.Hash, EntryMetadata, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
     // Priority queue stores hash with metadata (avoids copying Transaction structs with slices)
     entries: std.PriorityQueue(QueueEntry, void, compareQueueEntry),
     // Store sender -> transaction indices directly
     // Use HashMap<Address, usize> where usize is the first transaction index for that sender
     // Then scan storage for all transactions from that sender
-    // This avoids arrays of slices/hashes which trigger the allocator bug
-    by_sender: std.HashMap(core.types.Address, usize, AddressContext, std.hash_map.default_max_load_percentage),
+    by_sender: std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
     wal: ?wal.WriteAheadLog = null,
     size: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config) !Mempool {
-        // Initialize custom transaction storage (pre-allocated, avoids allocator bug)
+        // Initialize custom transaction storage (pre-allocated)
         var storage = try TransactionStorage.init(allocator, @intCast(cfg.mempool_max_size));
         errdefer storage.deinit();
 
         // Don't pre-allocate HashMap capacity - let it grow naturally
-        // Pre-allocation might trigger the allocator bug
         var mempool = Mempool{
             .allocator = allocator,
             .config = cfg,
             .storage = storage,
-            .by_hash = std.HashMap(core.types.Hash, usize, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .metadata = std.HashMap(core.types.Hash, EntryMetadata, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .by_hash = std.HashMap(core.types.Hash, usize, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
+            .metadata = std.HashMap(core.types.Hash, EntryMetadata, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
             .entries = std.PriorityQueue(QueueEntry, void, compareQueueEntry).init(allocator, {}),
-            .by_sender = std.HashMap(core.types.Address, usize, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .by_sender = std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage).init(allocator),
         };
 
         // Initialize WAL if configured
@@ -225,7 +202,7 @@ pub const Mempool = struct {
         }
 
         const tx_hash = try tx.hash(self.allocator);
-        // tx_hash is U256 struct (not allocated), no need to free
+        // tx_hash is u256 (not allocated), no need to free
 
         // Check if already exists
         if (self.by_hash.contains(tx_hash)) {
@@ -300,7 +277,7 @@ pub const Mempool = struct {
             if (i == tx_index) continue; // Skip the one we're removing
             const other_tx = self.storage.get(i) catch continue;
             const other_sender = other_tx.sender() catch continue;
-            if (other_sender.eql(sender)) {
+            if (other_sender == sender) {
                 has_other_txs = true;
                 break;
             }
@@ -370,7 +347,7 @@ pub const Mempool = struct {
         while (i < self.storage.count) : (i += 1) {
             const tx = self.storage.get(i) catch continue;
             const tx_sender = tx.sender() catch continue;
-            if (tx_sender.eql(sender)) {
+            if (tx_sender == sender) {
                 try result.append(tx);
             }
         }

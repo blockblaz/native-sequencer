@@ -11,15 +11,15 @@ pub const ExecuteTxType: u8 = 0x05;
 
 pub const ExecuteTx = struct {
     // Standard EIP-1559 fields
-    chain_id: types.U256,
+    chain_id: u256,
     nonce: u64,
-    gas_tip_cap: types.U256, // maxPriorityFeePerGas
-    gas_fee_cap: types.U256, // maxFeePerGas
+    gas_tip_cap: u256, // maxPriorityFeePerGas
+    gas_fee_cap: u256, // maxFeePerGas
     gas: u64,
 
     // Execution target
     to: ?types.Address,
-    value: types.U256,
+    value: u256,
     data: []const u8,
 
     // EXECUTE-specific fields
@@ -34,9 +34,9 @@ pub const ExecuteTx = struct {
     blob_hashes: []types.Hash,
 
     // Signature
-    v: types.U256,
-    r: types.U256,
-    s: types.U256,
+    v: u256,
+    r: u256,
+    s: u256,
 
     const Self = @This();
 
@@ -53,7 +53,7 @@ pub const ExecuteTx = struct {
         try prefixed.append(ExecuteTxType);
         try prefixed.appendSlice(rlp_data);
 
-        // keccak256 returns Hash (U256), which is what we need
+        // keccak256 returns Hash (u256), which is what we need
         return crypto_hash.keccak256(prefixed.items);
     }
 
@@ -68,7 +68,7 @@ pub const ExecuteTx = struct {
         }
 
         // ChainID
-        const chain_id_bytes = self.chain_id.toBytes();
+        const chain_id_bytes = types.u256ToBytes(self.chain_id);
         const chain_id_encoded = try rlp_module.encodeBytes(allocator, &chain_id_bytes);
         try items.append(chain_id_encoded);
 
@@ -77,12 +77,12 @@ pub const ExecuteTx = struct {
         try items.append(nonce_encoded);
 
         // GasTipCap
-        const gas_tip_cap_bytes = self.gas_tip_cap.toBytes();
+        const gas_tip_cap_bytes = types.u256ToBytes(self.gas_tip_cap);
         const gas_tip_cap_encoded = try rlp_module.encodeBytes(allocator, &gas_tip_cap_bytes);
         try items.append(gas_tip_cap_encoded);
 
         // GasFeeCap
-        const gas_fee_cap_bytes = self.gas_fee_cap.toBytes();
+        const gas_fee_cap_bytes = types.u256ToBytes(self.gas_fee_cap);
         const gas_fee_cap_encoded = try rlp_module.encodeBytes(allocator, &gas_fee_cap_bytes);
         try items.append(gas_fee_cap_encoded);
 
@@ -101,7 +101,7 @@ pub const ExecuteTx = struct {
         }
 
         // Value
-        const value_bytes = self.value.toBytes();
+        const value_bytes = types.u256ToBytes(self.value);
         const value_encoded = try rlp_module.encodeBytes(allocator, &value_bytes);
         try items.append(value_encoded);
 
@@ -110,7 +110,7 @@ pub const ExecuteTx = struct {
         try items.append(data_encoded);
 
         // PreStateHash
-        const pre_state_hash_bytes = self.pre_state_hash.toBytes();
+        const pre_state_hash_bytes = types.hashToBytes(self.pre_state_hash);
         const pre_state_hash_encoded = try rlp_module.encodeBytes(allocator, &pre_state_hash_bytes);
         try items.append(pre_state_hash_encoded);
 
@@ -154,7 +154,7 @@ pub const ExecuteTx = struct {
             blob_hashes_items.deinit();
         }
         for (self.blob_hashes) |blob_hash| {
-            const blob_hash_bytes = blob_hash.toBytes();
+            const blob_hash_bytes = types.hashToBytes(blob_hash);
             const blob_hash_encoded = try rlp_module.encodeBytes(allocator, &blob_hash_bytes);
             try blob_hashes_items.append(blob_hash_encoded);
         }
@@ -163,17 +163,17 @@ pub const ExecuteTx = struct {
         try items.append(blob_hashes_list);
 
         // V
-        const v_bytes = self.v.toBytes();
+        const v_bytes = types.u256ToBytes(self.v);
         const v_encoded = try rlp_module.encodeBytes(allocator, &v_bytes);
         try items.append(v_encoded);
 
         // R
-        const r_bytes = self.r.toBytes();
+        const r_bytes = types.u256ToBytes(self.r);
         const r_encoded = try rlp_module.encodeBytes(allocator, &r_bytes);
         try items.append(r_encoded);
 
         // S
-        const s_bytes = self.s.toBytes();
+        const s_bytes = types.u256ToBytes(self.s);
         const s_encoded = try rlp_module.encodeBytes(allocator, &s_bytes);
         try items.append(s_encoded);
 
@@ -210,7 +210,7 @@ pub const ExecuteTx = struct {
         if (chain_id_result.value.len != 32) return error.InvalidRLP;
         var chain_id_bytes: [32]u8 = undefined;
         @memcpy(&chain_id_bytes, chain_id_result.value);
-        const chain_id = types.U256.fromBytes(chain_id_bytes);
+        const chain_id = types.u256FromBytes(chain_id_bytes);
         idx += 1;
 
         // Nonce
@@ -226,7 +226,7 @@ pub const ExecuteTx = struct {
         if (gas_tip_cap_result.value.len != 32) return error.InvalidRLP;
         var gas_tip_cap_bytes: [32]u8 = undefined;
         @memcpy(&gas_tip_cap_bytes, gas_tip_cap_result.value);
-        const gas_tip_cap = types.U256.fromBytes(gas_tip_cap_bytes);
+        const gas_tip_cap = types.u256FromBytes(gas_tip_cap_bytes);
         idx += 1;
 
         // GasFeeCap
@@ -236,7 +236,7 @@ pub const ExecuteTx = struct {
         if (gas_fee_cap_result.value.len != 32) return error.InvalidRLP;
         var gas_fee_cap_bytes: [32]u8 = undefined;
         @memcpy(&gas_fee_cap_bytes, gas_fee_cap_result.value);
-        const gas_fee_cap = types.U256.fromBytes(gas_fee_cap_bytes);
+        const gas_fee_cap = types.u256FromBytes(gas_fee_cap_bytes);
         idx += 1;
 
         // Gas
@@ -264,7 +264,7 @@ pub const ExecuteTx = struct {
         if (value_result.value.len != 32) return error.InvalidRLP;
         var value_bytes: [32]u8 = undefined;
         @memcpy(&value_bytes, value_result.value);
-        const value = types.U256.fromBytes(value_bytes);
+        const value = types.u256FromBytes(value_bytes);
         idx += 1;
 
         // Data
@@ -368,7 +368,7 @@ pub const ExecuteTx = struct {
         }
         var v_bytes: [32]u8 = undefined;
         @memcpy(&v_bytes, v_result.value);
-        const v = types.U256.fromBytes(v_bytes);
+        const v = types.u256FromBytes(v_bytes);
         idx += 1;
 
         // R
@@ -384,7 +384,7 @@ pub const ExecuteTx = struct {
         }
         var r_bytes: [32]u8 = undefined;
         @memcpy(&r_bytes, r_result.value);
-        const r = types.U256.fromBytes(r_bytes);
+        const r = types.u256FromBytes(r_bytes);
         idx += 1;
 
         // S
@@ -400,7 +400,7 @@ pub const ExecuteTx = struct {
         }
         var s_bytes: [32]u8 = undefined;
         @memcpy(&s_bytes, s_result.value);
-        const s = types.U256.fromBytes(s_bytes);
+        const s = types.u256FromBytes(s_bytes);
 
         // Validate witness and withdrawals sizes
         if (witness_bytes.len != witness_size) {
@@ -471,11 +471,10 @@ pub const ExecuteTx = struct {
         // and recover the address from the signature
         const tx_hash = try self.hash(allocator);
 
-        // Extract r, s, v from U256 fields
-        const r_bytes = self.r.toBytes();
-        const s_bytes = self.s.toBytes();
-        const v_value = self.v.toU256();
-        const v_byte = @as(u8, @intCast(v_value & 0xff));
+        // Extract r, s, v from u256 fields
+        const r_bytes = types.u256ToBytes(self.r);
+        const s_bytes = types.u256ToBytes(self.s);
+        const v_byte = @as(u8, @intCast(self.v & 0xff));
 
         // Create signature struct
         const sig = types.Signature{
@@ -493,7 +492,7 @@ pub const ExecuteTx = struct {
     }
 
     /// Get priority for mempool ordering (gas fee cap)
-    pub fn priority(self: *const Self) types.U256 {
+    pub fn priority(self: *const Self) u256 {
         return self.gas_fee_cap;
     }
 
@@ -506,7 +505,7 @@ pub const ExecuteTx = struct {
         try obj.put("type", std.json.Value{ .string = try std.fmt.allocPrint(allocator, "0x{d:0>2}", .{ExecuteTxType}) });
 
         // ChainID
-        const chain_id_hex = try u256ToHex(allocator, self.chain_id.toU256());
+        const chain_id_hex = try u256ToHex(allocator, self.chain_id);
         try obj.put("chainId", std.json.Value{ .string = chain_id_hex });
 
         // Nonce
@@ -527,15 +526,15 @@ pub const ExecuteTx = struct {
         }
 
         // MaxPriorityFeePerGas
-        const gas_tip_cap_hex = try u256ToHex(allocator, self.gas_tip_cap.toU256());
+        const gas_tip_cap_hex = try u256ToHex(allocator, self.gas_tip_cap);
         try obj.put("maxPriorityFeePerGas", std.json.Value{ .string = gas_tip_cap_hex });
 
         // MaxFeePerGas
-        const gas_fee_cap_hex = try u256ToHex(allocator, self.gas_fee_cap.toU256());
+        const gas_fee_cap_hex = try u256ToHex(allocator, self.gas_fee_cap);
         try obj.put("maxFeePerGas", std.json.Value{ .string = gas_fee_cap_hex });
 
         // Value
-        const value_hex = try u256ToHex(allocator, self.value.toU256());
+        const value_hex = try u256ToHex(allocator, self.value);
         try obj.put("value", std.json.Value{ .string = value_hex });
 
         // Input (data)
@@ -543,7 +542,7 @@ pub const ExecuteTx = struct {
         try obj.put("input", std.json.Value{ .string = input_hex });
 
         // PreStateHash
-        const pre_state_hash_bytes = self.pre_state_hash.toBytes();
+        const pre_state_hash_bytes = types.hashToBytes(self.pre_state_hash);
         const pre_state_hash_hex = try bytesToHex(allocator, &pre_state_hash_bytes);
         try obj.put("preStateHash", std.json.Value{ .string = pre_state_hash_hex });
 
@@ -581,7 +580,7 @@ pub const ExecuteTx = struct {
             var blob_array = std.ArrayList(std.json.Value).init(allocator);
             errdefer blob_array.deinit();
             for (self.blob_hashes) |blob_hash| {
-                const blob_hash_bytes = blob_hash.toBytes();
+                const blob_hash_bytes = types.hashToBytes(blob_hash);
                 const blob_hash_hex = try bytesToHex(allocator, &blob_hash_bytes);
                 try blob_array.append(std.json.Value{ .string = blob_hash_hex });
             }
@@ -589,15 +588,15 @@ pub const ExecuteTx = struct {
         }
 
         // V
-        const v_hex = try u256ToHex(allocator, self.v.toU256());
+        const v_hex = try u256ToHex(allocator, self.v);
         try obj.put("v", std.json.Value{ .string = v_hex });
 
         // R
-        const r_hex = try u256ToHex(allocator, self.r.toU256());
+        const r_hex = try u256ToHex(allocator, self.r);
         try obj.put("r", std.json.Value{ .string = r_hex });
 
         // S
-        const s_hex = try u256ToHex(allocator, self.s.toU256());
+        const s_hex = try u256ToHex(allocator, self.s);
         try obj.put("s", std.json.Value{ .string = s_hex });
 
         return std.json.Value{ .object = obj };
@@ -874,7 +873,7 @@ pub const ExecuteTx = struct {
         const s = try hexToU256(s_hex);
 
         // V (required, can be from v or yParity)
-        var v: types.U256 = undefined;
+        var v: u256 = undefined;
         if (obj.get("v")) |v_val| {
             const v_hex = switch (v_val) {
                 .string => |v_str| v_str,
@@ -900,9 +899,8 @@ pub const ExecuteTx = struct {
             };
             const yparity = try hexToU64(yparity_hex);
             // Convert yParity to v (for EIP-155, v = chain_id * 2 + 35 + yParity)
-            const chain_id_u64 = chain_id.toU256();
-            const v_value = (chain_id_u64 * 2) + 35 + yparity;
-            v = types.U256.fromU256(v_value);
+            const v_value = (chain_id * 2) + 35 + yparity;
+            v = v_value;
         } else {
             blob_hashes.deinit();
             allocator.free(data_bytes);
@@ -947,13 +945,13 @@ pub const ExecuteTx = struct {
 // Helper functions for JSON serialization
 
 fn u256ToHex(allocator: std.mem.Allocator, value: u256) ![]u8 {
-    const bytes = types.U256.fromU256(value).toBytes();
+    const bytes = types.u256ToBytes(value);
     return bytesToHex(allocator, &bytes);
 }
 
-fn hexToU256(hex_str: []const u8) !types.U256 {
+fn hexToU256(hex_str: []const u8) !u256 {
     const bytes = try hexToBytesNoAlloc(hex_str);
-    return types.U256.fromBytes(bytes);
+    return types.u256FromBytes(bytes);
 }
 
 fn hexToU64(hex_str: []const u8) !u64 {

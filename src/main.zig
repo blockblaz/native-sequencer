@@ -157,7 +157,7 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
 
 fn formatHash(hash: lib.core.types.Hash) []const u8 {
     // Format hash as hex string for logging
-    const bytes = hash.toBytes();
+    const bytes = lib.core.types.hashToBytes(hash);
     var buffer: [66]u8 = undefined; // "0x" + 64 hex chars
     buffer[0] = '0';
     buffer[1] = 'x';

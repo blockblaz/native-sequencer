@@ -2,31 +2,11 @@ const std = @import("std");
 const core = @import("../core/root.zig");
 const persistence = @import("../persistence/root.zig");
 
-// Custom hash context for U256 struct (two u128 fields)
-// This avoids the allocator bug with native u256
-const HashContext = struct {
-    pub fn hash(_: @This(), key: core.types.Hash) u64 {
-        return key.hash();
-    }
-    pub fn eql(_: @This(), a: core.types.Hash, b: core.types.Hash) bool {
-        return a.eql(b);
-    }
-};
-
-const AddressContext = struct {
-    pub fn hash(_: @This(), key: core.types.Address) u64 {
-        return key.hash();
-    }
-    pub fn eql(_: @This(), a: core.types.Address, b: core.types.Address) bool {
-        return a.eql(b);
-    }
-};
-
 pub const StateManager = struct {
     allocator: std.mem.Allocator,
-    nonces: std.HashMap(core.types.Address, u64, AddressContext, std.hash_map.default_max_load_percentage),
-    balances: std.HashMap(core.types.Address, u256, AddressContext, std.hash_map.default_max_load_percentage),
-    receipts: std.HashMap(core.types.Hash, core.receipt.Receipt, HashContext, std.hash_map.default_max_load_percentage),
+    nonces: std.HashMap(core.types.Address, u64, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
+    balances: std.HashMap(core.types.Address, u256, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
+    receipts: std.HashMap(core.types.Hash, core.receipt.Receipt, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
     current_block_number: u64 = 0,
     db: ?*persistence.rocksdb.Database = null,
     use_persistence: bool = false,
@@ -35,9 +15,9 @@ pub const StateManager = struct {
     pub fn init(allocator: std.mem.Allocator) StateManager {
         return .{
             .allocator = allocator,
-            .nonces = std.HashMap(core.types.Address, u64, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .balances = std.HashMap(core.types.Address, u256, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .receipts = std.HashMap(core.types.Hash, core.receipt.Receipt, HashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .nonces = std.HashMap(core.types.Address, u64, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage).init(allocator),
+            .balances = std.HashMap(core.types.Address, u256, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage).init(allocator),
+            .receipts = std.HashMap(core.types.Hash, core.receipt.Receipt, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
             .db = null,
             .use_persistence = false,
         };

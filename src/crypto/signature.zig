@@ -107,7 +107,7 @@ pub fn recoverAddress(tx: *const transaction.Transaction) !types.Address {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     const tx_hash = try tx.hash(allocator);
-    // tx_hash is U256 struct (stack-allocated), no need to free
+    // tx_hash is u256 (stack-allocated), no need to free
 
     // Create signature struct from transaction fields
     const sig = types.Signature{
@@ -147,7 +147,7 @@ pub fn verifySignature(tx: *const transaction.Transaction) !bool {
         std.log.debug("Failed to compute transaction hash", .{});
         return false;
     };
-    // tx_hash is U256 struct (stack-allocated), no need to free
+    // tx_hash is u256 (stack-allocated), no need to free
 
     // Step 3: Create signature struct
     const sig = types.Signature{
@@ -172,8 +172,8 @@ pub fn verifySignature(tx: *const transaction.Transaction) !bool {
         return false;
     };
 
-    // Step 7: Compare addresses (U256 comparison)
-    const addresses_match = recovered_address.eql(expected_sender);
+    // Step 7: Compare addresses (u256 comparison)
+        const addresses_match = recovered_address == expected_sender;
     if (!addresses_match) {
         std.log.debug("Recovered address does not match expected sender", .{});
     }
