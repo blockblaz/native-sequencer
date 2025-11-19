@@ -113,7 +113,7 @@ docker build -t native-sequencer .
 # Run with Docker
 docker run -d \
   --name sequencer \
-  -p 8545:8545 \
+  -p 6197:6197 \
   -p 9090:9090 \
   -v sequencer-data:/app/data \
   -e L1_RPC_URL=http://host.docker.internal:8545 \
@@ -141,7 +141,7 @@ The container accepts the following environment variables (all have defaults set
 
 **API Configuration**:
 - `API_HOST`: API server host (default: `0.0.0.0`)
-- `API_PORT`: API server port (default: `8545`)
+- `API_PORT`: API server port (default: `6197`)
 
 **L1 Configuration**:
 - `L1_RPC_URL`: L1 JSON-RPC endpoint (default: `http://host.docker.internal:8545`)
@@ -171,7 +171,7 @@ The container accepts the following environment variables (all have defaults set
 #### Ports
 
 The container exposes two ports:
-- **8545**: JSON-RPC API endpoint
+- **6197**: JSON-RPC API endpoint
 - **9090**: Metrics endpoint
 
 #### Volumes
@@ -201,7 +201,7 @@ docker logs sequencer
 **Port already in use**:
 Change the port mapping:
 ```bash
-docker run -p 18545:8545 -p 19090:9090 ...
+docker run -p 16197:6197 -p 19090:9090 ...
 ```
 
 **L1 connection issues**:
@@ -261,7 +261,7 @@ Requires=docker.service
 Type=simple
 Restart=always
 ExecStart=/usr/bin/docker run --rm --name sequencer \
-  -p 8545:8545 -p 9090:9090 \
+  -p 6197:6197 -p 9090:9090 \
   -v sequencer-data:/app/data \
   -e L1_RPC_URL=\${L1_RPC_URL} \
   -e SEQUENCER_KEY=\${SEQUENCER_KEY} \
@@ -296,7 +296,7 @@ Configure the sequencer using environment variables:
 ```bash
 # API Server Configuration
 export API_HOST=0.0.0.0          # API server host (default: 0.0.0.0)
-export API_PORT=8545            # API server port (default: 8545)
+export API_PORT=6197            # API server port (default: 6197)
 
 # L1 Configuration
 export L1_RPC_URL=http://localhost:8545  # L1 JSON-RPC endpoint
@@ -320,7 +320,7 @@ export BLOCK_GAS_LIMIT=30000000  # Gas limit per block
 
 ```bash
 # Set configuration
-export API_PORT=8545
+export API_PORT=6197
 export L1_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 export L1_CHAIN_ID=1
 export SEQUENCER_KEY=0x1234567890abcdef...

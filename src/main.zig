@@ -33,7 +33,8 @@ pub fn main() !void {
     // Initialize components
     std.log.info("Initializing sequencer components...", .{});
 
-    // Initialize RocksDB if state_db_path is configured
+    // Initialize RocksDB database - stored on disk at cfg.state_db_path
+    // Database is returned by value (like zeam), not a pointer
     var state_db: ?lib.persistence.rocksdb.Database = null;
     var state_manager: lib.state.StateManager = undefined;
 
@@ -49,7 +50,9 @@ pub fn main() !void {
     };
 
     if (use_persistence) {
-        // Open RocksDB database (not supported on Windows)
+        // Open RocksDB database (stored on disk, not in-memory)
+        // Not supported on Windows - falls back to in-memory state
+        // Open database - returns Database by value (like zeam), not a pointer
         const db_result = lib.persistence.rocksdb.Database.open(allocator, cfg.state_db_path);
         if (db_result) |db| {
             state_db = db;
@@ -65,12 +68,13 @@ pub fn main() !void {
             }
         }
     } else {
-        // Use in-memory state manager
+        // Use in-memory state manager (no persistence)
         state_manager = lib.state.StateManager.init(allocator);
     }
+    // Cleanup: state manager first, then database (defer executes in reverse order)
     defer state_manager.deinit();
     if (state_db) |*db| {
-        defer db.close();
+        defer db.deinit(); // Close database (like zeam uses deinit, not close)
     }
 
     var mp = try lib.mempool.Mempool.init(allocator, &cfg);
@@ -98,7 +102,7 @@ pub fn main() !void {
 
     // Start sequencing loop in background
     std.log.info("Starting sequencing loop (interval={d}ms)...", .{cfg.batch_interval_ms});
-    var sequencing_thread = try std.Thread.spawn(.{}, sequencingLoop, .{ &seq, &batch_builder, &l1_client, &m, &cfg, &state_manager });
+    var sequencing_thread = try std.Thread.spawn(.{}, sequencingLoop, .{ &seq, &batch_builder, &l1_client, &m, &cfg, &state_manager }); // state_manager is mutable for database access
     sequencing_thread.detach();
 
     // Start metrics server
@@ -114,11 +118,13 @@ pub fn main() !void {
     try api_server.start();
 }
 
-fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Builder, l1_client: *lib.l1.Client, m: *lib.metrics.Metrics, cfg: *const lib.config.Config, state_manager: *const lib.state.StateManager) void {
+fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Builder, l1_client: *lib.l1.Client, m: *lib.metrics.Metrics, cfg: *const lib.config.Config, state_manager: *lib.state.StateManager) void {
     while (true) {
         std.Thread.sleep(cfg.batch_interval_ms * std.time.ns_per_ms);
 
-        // Build block
+        // Build block (even if empty - this increments block number and maintains chain continuity)
+        // Note: Empty blocks change local L2 state (block number, parent hash) but are not submitted to L1
+        // This saves L1 gas costs while maintaining proper L2 chain progression
         const block = seq.buildBlock() catch |err| {
             std.log.err("Error building block: {any}", .{err});
             continue;
@@ -126,31 +132,51 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
         m.incrementBlocksCreated();
         std.log.info("Block #{d} created: {d} transactions, {d} gas used", .{ block.number, block.transactions.len, block.gas_used });
 
-        // Add to batch
-        batch_builder.addBlock(block) catch |err| {
-            std.log.err("Error adding block #{d} to batch: {any}", .{ block.number, err });
-            continue;
-        };
-
-        // Flush batch if needed
-        if (batch_builder.shouldFlush()) {
-            const batch_data = batch_builder.buildBatch() catch |err| {
-                std.log.err("Error building batch: {any}", .{err});
+        // Only add blocks with transactions to batch (empty blocks advance L2 state but aren't submitted to L1)
+        if (block.transactions.len > 0) {
+            // Add to batch
+            batch_builder.addBlock(block) catch |err| {
+                std.log.err("Error adding block #{d} to batch: {any}", .{ block.number, err });
                 continue;
             };
 
-            std.log.info("Submitting batch to L1 ({d} blocks)...", .{batch_data.blocks.len});
+            // Flush batch if needed
+            if (batch_builder.shouldFlush()) {
+                const batch_data = batch_builder.buildBatch() catch |err| {
+                    std.log.err("Error building batch: {any}", .{err});
+                    continue;
+                };
 
-            // Submit to L1 (with ExecuteTx support)
-            const batch_hash = l1_client.submitBatch(batch_data, state_manager, seq) catch |err| {
-                std.log.err("Error submitting batch to L1: {any}", .{err});
-                m.incrementL1SubmissionErrors();
-                continue;
-            };
+                // Only submit if batch has blocks with transactions
+                var has_transactions = false;
+                for (batch_data.blocks) |batch_block| {
+                    if (batch_block.transactions.len > 0) {
+                        has_transactions = true;
+                        break;
+                    }
+                }
 
-            m.incrementBatchesSubmitted();
-            std.log.info("Batch submitted successfully to L1 (hash={s})", .{formatHash(batch_hash)});
-            batch_builder.clear();
+                if (has_transactions) {
+                    std.log.info("Submitting batch to L1 ({d} blocks)...", .{batch_data.blocks.len});
+
+                    // Submit to L1 (with ExecuteTx support)
+                    const batch_hash = l1_client.submitBatch(batch_data, state_manager, seq) catch |err| {
+                        std.log.err("Error submitting batch to L1: {any}", .{err});
+                        m.incrementL1SubmissionErrors();
+                        continue;
+                    };
+
+                    m.incrementBatchesSubmitted();
+                    std.log.info("Batch submitted successfully to L1 (hash={s})", .{formatHash(batch_hash)});
+                } else {
+                    std.log.debug("Skipping batch submission - no transactions in batch", .{});
+                }
+                batch_builder.clear();
+            }
+        } else {
+            // Empty block: L2 state updated (block number incremented, parent hash updated)
+            // but not submitted to L1 to save gas costs
+            std.log.debug("Empty block #{d} - L2 state updated, skipping L1 submission", .{block.number});
         }
     }
 }

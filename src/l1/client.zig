@@ -9,7 +9,7 @@ pub const Client = struct {
     l1_chain_id: u64,
     sequencer_private_key: ?[32]u8 = null,
     sequencer_address: ?core.types.Address = null,
-    execute_tx_builder: ?*@import("execute_tx_builder.zig").ExecuteTxBuilder = null,
+    execute_tx_builder: ?@import("execute_tx_builder.zig").ExecuteTxBuilder = null,
 
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config) Client {
         var client = Client{
@@ -43,8 +43,13 @@ pub const Client = struct {
 
     pub fn submitBatch(self: *Client, batch: core.batch.Batch, state_manager: *const @import("../state/root.zig").StateManager, sequencer: *const @import("../sequencer/root.zig").Sequencer) !core.types.Hash {
         // Use ExecuteTx for batch submission if sequencer key is configured
+        // Only use ExecuteTx if we can successfully get nonce (L1 RPC is available)
         if (self.sequencer_private_key) |key| {
-            return try self.submitBatchAsExecuteTx(batch, state_manager, sequencer, key);
+            // Try to use ExecuteTx, but fall back to legacy if L1 RPC fails
+            return self.submitBatchAsExecuteTx(batch, state_manager, sequencer, key) catch |err| {
+                std.log.warn("ExecuteTx submission failed, falling back to legacy: {any}", .{err});
+                return try self.submitBatchLegacy(batch);
+            };
         } else {
             // Fallback to legacy batch submission
             return try self.submitBatchLegacy(batch);
@@ -60,10 +65,9 @@ pub const Client = struct {
 
         // Initialize ExecuteTx builder if not already done
         if (self.execute_tx_builder == null) {
-            var builder = @import("execute_tx_builder.zig").ExecuteTxBuilder.init(self.allocator, self.l1_chain_id, sequencer_addr);
-            self.execute_tx_builder = &builder;
+            self.execute_tx_builder = @import("execute_tx_builder.zig").ExecuteTxBuilder.init(self.allocator, self.l1_chain_id, sequencer_addr);
         }
-        const builder = self.execute_tx_builder.?;
+        const builder = &self.execute_tx_builder.?;
 
         // Get nonce from L1 (simplified - in production fetch from L1)
         const nonce = try self.getNonce(sequencer_addr);

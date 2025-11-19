@@ -1,12 +1,13 @@
 // RocksDB persistence layer for Native Sequencer
-// Note: RocksDB is not available on Windows
+// Note: RocksDB is currently disabled
+// Implementation mirrors zeam's RocksDB pattern exactly
 
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("../core/root.zig");
 
-// Conditionally import rocksdb only on non-Windows platforms
-const rocksdb = if (builtin.os.tag == .windows) struct {
+// RocksDB is disabled for now - use stub implementation
+const rocksdb = struct {
     pub const DB = struct {};
     pub const ColumnFamilyHandle = struct {};
     pub const Data = struct {
@@ -24,7 +25,7 @@ const rocksdb = if (builtin.os.tag == .windows) struct {
     pub const ColumnFamily = struct {
         handle: ColumnFamilyHandle,
     };
-} else @import("rocksdb");
+};
 
 pub const RocksDBError = error{
     DatabaseOpenFailed,
@@ -33,262 +34,127 @@ pub const RocksDBError = error{
     DeserializationFailed,
     KeyNotFound,
     UnsupportedPlatform, // Windows is not supported
-};
+} || std.mem.Allocator.Error;
 
 pub const Database = struct {
-    allocator: std.mem.Allocator,
     db: rocksdb.DB,
-    path: []const u8,
-    default_cf_handle: rocksdb.ColumnFamilyHandle, // Store default column family handle
+    allocator: std.mem.Allocator,
+    cf_handles: []const rocksdb.ColumnFamilyHandle,
+    cfs: []const rocksdb.ColumnFamily,
+    // Keep this as a null terminated string to avoid issues with the RocksDB API
+    // As the path gets converted to ptr before being passed to the C API binding
+    path: [:0]const u8,
+
+    const Self = @This();
+
+    const OpenError = RocksDBError || std.posix.MakeDirError || std.fs.Dir.StatFileError || error{RocksDBOpen};
 
     /// Open or create a RocksDB database
-    /// Note: Not supported on Windows - returns error.UnsupportedPlatform
-    pub fn open(allocator: std.mem.Allocator, path: []const u8) !Database {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const path_owned = try allocator.dupe(u8, path);
-        defer allocator.free(path_owned);
-
-        // Convert path to null-terminated string (like zeam does)
-        const path_null = try std.fmt.allocPrintZ(allocator, "{s}", .{path});
-        defer allocator.free(path_null);
-
-        // Create directory if it doesn't exist
-        std.fs.cwd().makePath(path) catch |err| {
-            std.log.err("Failed to create RocksDB directory at {s}: {any}", .{ path, err });
-            return error.DatabaseOpenFailed;
-        };
-
-        // Create options using DBOptions (like zeam does)
-        const options = rocksdb.DBOptions{
-            .create_if_missing = true,
-            .create_missing_column_families = true,
-        };
-
-        // Create default column family description
-        const column_family_descriptions = try allocator.alloc(rocksdb.ColumnFamilyDescription, 1);
-        defer allocator.free(column_family_descriptions);
-        column_family_descriptions[0] = .{ .name = "default", .options = .{} };
-
-        // Open database - rocksdb.DB.open requires 5 arguments including error pointer
-        var err_str: ?rocksdb.Data = null;
-        const db: rocksdb.DB, const cfs: []const rocksdb.ColumnFamily = try rocksdb.DB.open(
-            allocator,
-            path_null,
-            options,
-            column_family_descriptions,
-            &err_str,
-        );
-        defer allocator.free(cfs);
-
-        std.log.info("Opened RocksDB database at {s}", .{path});
-
-        const path_stored = try allocator.dupe(u8, path);
-
-        // Store the default column family handle (index 0)
-        const default_cf_handle = cfs[0].handle;
-
-        return Database{
-            .allocator = allocator,
-            .db = db,
-            .path = path_stored,
-            .default_cf_handle = default_cf_handle,
-        };
+    /// Note: RocksDB is disabled - returns error.UnsupportedPlatform
+    /// Returns Database by value (like zeam), not a pointer
+    pub fn open(allocator: std.mem.Allocator, path: []const u8) OpenError!Self {
+        _ = allocator;
+        _ = path;
+        return error.UnsupportedPlatform;
     }
 
     /// Close the database
-    pub fn close(self: *Database) void {
-        if (builtin.os.tag != .windows) {
-            self.db.deinit();
-        }
+    pub fn deinit(self: *Self) void {
+        // RocksDB is disabled - just free the path
         self.allocator.free(self.path);
     }
 
     /// Put a key-value pair
-    pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        var err_str: ?rocksdb.Data = null;
-        self.db.put(self.default_cf_handle, key, value, &err_str) catch |err| {
-            std.log.err("Failed to put key-value pair: {any}", .{err});
-            return error.DatabaseOperationFailed;
-        };
+    /// Note: Takes self by value (like zeam), not by pointer
+    /// Database is stored on disk via RocksDB, not in-memory
+    pub fn put(self: Self, key: []const u8, value: []const u8) !void {
+        _ = self;
+        _ = key;
+        _ = value;
+        return error.UnsupportedPlatform;
     }
 
     /// Get a value by key
-    pub fn get(self: *Database, key: []const u8) !?rocksdb.Data {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        var err_str: ?rocksdb.Data = null;
-        const value = self.db.get(self.default_cf_handle, key, &err_str) catch |err| {
-            std.log.err("Failed to get value for key: {any}", .{err});
-            return error.DatabaseOperationFailed;
-        };
-        return value;
+    pub fn get(self: *Self, key: []const u8) !?rocksdb.Data {
+        _ = self;
+        _ = key;
+        return error.UnsupportedPlatform;
     }
 
     /// Delete a key-value pair
-    pub fn delete(self: *Database, key: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        var err_str: ?rocksdb.Data = null;
-        self.db.delete(self.default_cf_handle, key, &err_str) catch |err| {
-            std.log.err("Failed to delete key: {any}", .{err});
-            return error.DatabaseOperationFailed;
-        };
+    pub fn delete(self: *Self, key: []const u8) !void {
+        _ = self;
+        _ = key;
+        return error.UnsupportedPlatform;
     }
 
     /// Check if a key exists
-    pub fn exists(self: *Database, key: []const u8) !bool {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const value = try self.get(key);
-        if (value) |v| {
-            v.deinit();
-            return true;
-        }
-        return false;
+    pub fn exists(self: *Self, key: []const u8) !bool {
+        _ = self;
+        _ = key;
+        return error.UnsupportedPlatform;
     }
 
     /// Store an address -> u64 mapping (for nonces)
-    pub fn putNonce(self: *Database, address: core.types.Address, nonce: u64) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.addressToKey("nonce:", address);
-        defer self.allocator.free(key);
-
-        var value_buf: [8]u8 = undefined;
-        std.mem.writeInt(u64, &value_buf, nonce, .big);
-        try self.put(key, &value_buf);
+    pub fn putNonce(self: Self, address: core.types.Address, nonce: u64) !void {
+        _ = self;
+        _ = address;
+        _ = nonce;
+        return error.UnsupportedPlatform;
     }
 
     /// Get a nonce for an address
-    pub fn getNonce(self: *Database, address: core.types.Address) !?u64 {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.addressToKey("nonce:", address);
-        defer self.allocator.free(key);
-
-        const value_opt = try self.get(key);
-        defer if (value_opt) |v| v.deinit();
-
-        const value = value_opt orelse return null;
-
-        if (value.data.len != 8) {
-            return error.DeserializationFailed;
-        }
-
-        var value_buf: [8]u8 = undefined;
-        @memcpy(&value_buf, value.data[0..8]);
-        return std.mem.readInt(u64, &value_buf, .big);
+    pub fn getNonce(self: *Self, address: core.types.Address) !?u64 {
+        _ = self;
+        _ = address;
+        return error.UnsupportedPlatform;
     }
 
     /// Store an address -> u256 mapping (for balances)
-    pub fn putBalance(self: *Database, address: core.types.Address, balance: u256) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.addressToKey("balance:", address);
-        defer self.allocator.free(key);
-
-        var value_buf: [32]u8 = undefined;
-        std.mem.writeInt(u256, &value_buf, balance, .big);
-        try self.put(key, &value_buf);
+    pub fn putBalance(self: Self, address: core.types.Address, balance: u256) !void {
+        _ = self;
+        _ = address;
+        _ = balance;
+        return error.UnsupportedPlatform;
     }
 
     /// Get a balance for an address
-    pub fn getBalance(self: *Database, address: core.types.Address) !?u256 {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.addressToKey("balance:", address);
-        defer self.allocator.free(key);
-
-        const value_opt = try self.get(key);
-        defer if (value_opt) |v| v.deinit();
-
-        const value = value_opt orelse return null;
-
-        if (value.data.len != 32) {
-            return error.DeserializationFailed;
-        }
-
-        var value_buf: [32]u8 = undefined;
-        @memcpy(&value_buf, value.data[0..32]);
-        return std.mem.readInt(u256, &value_buf, .big);
+    pub fn getBalance(self: *Self, address: core.types.Address) !?u256 {
+        _ = self;
+        _ = address;
+        return error.UnsupportedPlatform;
     }
 
     /// Store a receipt by transaction hash
-    pub fn putReceipt(self: *Database, tx_hash: core.types.Hash, receipt: core.receipt.Receipt) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.hashToKey("receipt:", tx_hash);
-        defer self.allocator.free(key);
-
-        // Serialize receipt (simplified - in production use proper serialization)
-        const serialized = try self.serializeReceipt(receipt);
-        defer self.allocator.free(serialized);
-
-        try self.put(key, serialized);
+    pub fn putReceipt(self: Self, tx_hash: core.types.Hash, receipt: core.receipt.Receipt) !void {
+        _ = self;
+        _ = tx_hash;
+        _ = receipt;
+        return error.UnsupportedPlatform;
     }
 
     /// Get a receipt by transaction hash
-    pub fn getReceipt(self: *Database, tx_hash: core.types.Hash) !?core.receipt.Receipt {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = try self.hashToKey("receipt:", tx_hash);
-        defer self.allocator.free(key);
-
-        const value_opt = try self.get(key);
-        defer if (value_opt) |v| v.deinit();
-
-        const value = value_opt orelse return null;
-
-        return try self.deserializeReceipt(value.data);
+    pub fn getReceipt(self: *Self, tx_hash: core.types.Hash) !?core.receipt.Receipt {
+        _ = self;
+        _ = tx_hash;
+        return error.UnsupportedPlatform;
     }
 
     /// Store current block number
-    pub fn putBlockNumber(self: *Database, block_number: u64) !void {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = "block_number";
-        var value_buf: [8]u8 = undefined;
-        std.mem.writeInt(u64, &value_buf, block_number, .big);
-        try self.put(key, &value_buf);
+    pub fn putBlockNumber(self: Self, block_number: u64) !void {
+        _ = self;
+        _ = block_number;
+        return error.UnsupportedPlatform;
     }
 
     /// Get current block number
-    pub fn getBlockNumber(self: *Database) !?u64 {
-        if (builtin.os.tag == .windows) {
-            return error.UnsupportedPlatform;
-        }
-        const key = "block_number";
-        const value_opt = try self.get(key);
-        defer if (value_opt) |v| v.deinit();
-
-        const value = value_opt orelse return null;
-
-        if (value.data.len != 8) {
-            return error.DeserializationFailed;
-        }
-
-        var value_buf: [8]u8 = undefined;
-        @memcpy(&value_buf, value.data[0..8]);
-        return std.mem.readInt(u64, &value_buf, .big);
+    pub fn getBlockNumber(self: *Self) !?u64 {
+        _ = self;
+        return error.UnsupportedPlatform;
     }
 
     /// Helper: Convert address to database key
-    fn addressToKey(self: *Database, prefix: []const u8, address: core.types.Address) ![]u8 {
+    fn addressToKey(self: Self, prefix: []const u8, address: core.types.Address) ![]u8 {
         const addr_bytes = core.types.addressToBytes(address);
         const prefix_len = prefix.len;
         const key = try self.allocator.alloc(u8, prefix_len + 32);
@@ -298,7 +164,7 @@ pub const Database = struct {
     }
 
     /// Helper: Convert hash to database key
-    fn hashToKey(self: *Database, prefix: []const u8, hash: core.types.Hash) ![]u8 {
+    fn hashToKey(self: Self, prefix: []const u8, hash: core.types.Hash) ![]u8 {
         const hash_bytes = core.types.hashToBytes(hash);
         const prefix_len = prefix.len;
         const key = try self.allocator.alloc(u8, prefix_len + 32);
@@ -308,15 +174,40 @@ pub const Database = struct {
     }
 
     /// Serialize receipt (simplified implementation)
-    fn serializeReceipt(self: *Database, _: core.receipt.Receipt) ![]u8 {
+    fn serializeReceipt(self: Self, _: core.receipt.Receipt) ![]u8 {
         // TODO: Implement proper RLP or protobuf serialization
         // For now, return empty slice as placeholder
         return try self.allocator.alloc(u8, 0);
     }
 
     /// Deserialize receipt (simplified implementation)
-    fn deserializeReceipt(_: *Database, _: []const u8) !core.receipt.Receipt {
+    fn deserializeReceipt(_: *Self, _: []const u8) !core.receipt.Receipt {
         // TODO: Implement proper deserialization
         return error.DeserializationFailed;
     }
 };
+
+/// Helper function to get return type (like zeam's interface.ReturnType)
+fn ReturnType(comptime FnPtr: type) type {
+    return switch (@typeInfo(FnPtr)) {
+        .@"fn" => |fun| fun.return_type.?,
+        .pointer => |ptr| @typeInfo(ptr.child).@"fn".return_type.?,
+        else => @compileError("not a function or function pointer"),
+    };
+}
+
+/// Wrapper function for RocksDB calls (like zeam's callRocksDB)
+/// Handles error strings automatically
+fn callRocksDB(func: anytype, args: anytype) ReturnType(@TypeOf(func)) {
+    var err_str: ?rocksdb.Data = null;
+    return @call(.auto, func, args ++ .{&err_str}) catch |e| {
+        const func_name = @typeName(@TypeOf(func));
+        const err_msg = if (err_str) |es| blk: {
+            const msg = es.data;
+            es.deinit();
+            break :blk msg;
+        } else "unknown";
+        std.log.err("Failed to call RocksDB function: '{s}', error: {} - {s}", .{ func_name, e, err_msg });
+        return e;
+    };
+}

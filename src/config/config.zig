@@ -3,11 +3,16 @@ const std = @import("std");
 pub const Config = struct {
     // API Server
     api_host: []const u8 = "0.0.0.0",
-    api_port: u16 = 8545,
+    api_port: u16 = 6197,
 
     // L1 Connection
     l1_rpc_url: []const u8 = "http://localhost:8545",
     l1_chain_id: u64 = 1,
+
+    // L2 Connection
+    l2_rpc_url: []const u8 = "http://localhost:8545",
+    l2_engine_api_port: u16 = 8551,
+    l2_chain_id: u64 = 1337,
 
     // Sequencer
     sequencer_private_key: ?[32]u8 = null,
@@ -44,6 +49,15 @@ pub const Config = struct {
 
         if (std.process.getEnvVarOwned(allocator, "L1_RPC_URL")) |url| {
             config.l1_rpc_url = url;
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "L2_RPC_URL")) |url| {
+            config.l2_rpc_url = url;
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "L2_ENGINE_API_PORT")) |port_str| {
+            config.l2_engine_api_port = try std.fmt.parseInt(u16, port_str, 10);
+            allocator.free(port_str);
         } else |_| {}
 
         if (std.process.getEnvVarOwned(allocator, "SEQUENCER_KEY")) |key_hex| {
