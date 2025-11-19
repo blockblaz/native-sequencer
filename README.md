@@ -29,6 +29,7 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 - **State Management**: Track nonces, balances, and receipts
 - **Observability**: Metrics endpoint for monitoring
 - **Operator Controls**: Emergency halt, rate limiting, configuration management
+- **ExecuteTx Support**: Stateless transaction type (0x05) with automatic forwarding to L1 geth
 
 ## Architecture
 
@@ -336,7 +337,7 @@ The sequencer exposes standard Ethereum JSON-RPC endpoints:
 
 #### `eth_sendRawTransaction`
 
-Submit a raw transaction to the sequencer.
+Submit a raw transaction to the sequencer. Supports both legacy transactions and ExecuteTx transactions (type 0x05).
 
 **Request**:
 ```json
@@ -356,6 +357,21 @@ Submit a raw transaction to the sequencer.
   "id": 1
 }
 ```
+
+**Transaction Types Supported**:
+- **Legacy Transactions**: Standard Ethereum transactions that are validated, stored in mempool, and sequenced into blocks
+- **ExecuteTx Transactions (Type 0x05)**: Stateless transactions that are forwarded directly to L1 geth for execution. These transactions include:
+  - Pre-state hash and witness data for stateless execution
+  - Withdrawals data
+  - Blob versioned hashes
+  - Standard EIP-1559 fields (chainId, nonce, gas, value, etc.)
+
+**ExecuteTx Handling**:
+- ExecuteTx transactions are stateless and designed to be executed by L1 geth
+- The sequencer performs minimal validation (signature check for deduplication)
+- ExecuteTx transactions are automatically forwarded to L1 geth via `eth_sendRawTransaction`
+- Full validation and execution is handled by L1 geth
+- ExecuteTx transactions are not stored in the sequencer's mempool
 
 #### `eth_getTransactionReceipt`
 
@@ -432,6 +448,9 @@ This is an experimental implementation. The following features are implemented o
 - ✅ HTTP server implementation (Zig 0.14.1 networking APIs)
 - ✅ HTTP client for L1 communication (JSON-RPC support)
 - ✅ Conditional transaction submission (EIP-7796 support)
+- ✅ ExecuteTx transaction type support (type 0x05)
+- ✅ ExecuteTx JSON serialization/deserialization
+- ✅ ExecuteTx forwarding to L1 geth
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
 - ⏳ Full transaction execution engine
 - ⏳ RocksDB/LMDB integration for persistence
@@ -484,7 +503,7 @@ The CI pipeline includes:
 - **Windows (x86_64)**: Builds and verifies binary for Windows
 
 #### Docker Build Validation
-- **Multi-architecture Docker builds**: Tests Docker image builds for both `linux/amd64` and `linux/arm64`
+- **Multi-architecture Docker builds**: Tests Docker image builds for `linux/amd64` (ARM64 builds are currently disabled in CI)
 - **Image verification**: Validates Docker image structure and metadata
 - **Runtime testing**: Verifies that the Docker image can start and contains the expected binary
 
@@ -506,15 +525,23 @@ The sequencer uses Zig 0.14.1's standard library networking APIs:
 - **Connection Handling**: Thread-based concurrent request handling with proper resource cleanup
 - **RLP Transaction Parsing**: Full RLP decoding support for transaction deserialization
 
-### Custom U256 Implementation
+### ExecuteTx Transaction Support
 
-Due to a compiler bug in Zig 0.14.x's HashMap implementation with native `u256` types, we use a custom `U256` struct implementation. This struct:
-- Uses two `u128` fields to represent 256-bit values
-- Provides conversion functions to/from native `u256` and byte arrays
-- Includes custom hash and equality functions for HashMap compatibility
-- Maintains full compatibility with Ethereum's 32-byte hashes and 20-byte addresses
+The sequencer supports ExecuteTx transactions (type 0x05), a stateless transaction type designed for execution by L1 geth nodes. Key features:
 
-See `src/core/types.zig` for implementation details and rationale.
+- **Transaction Type**: EIP-2718 typed transaction with type prefix `0x05`
+- **RLP Encoding/Decoding**: Full RLP serialization support matching go-ethereum's ExecuteTx format
+- **JSON Serialization**: Complete JSON-RPC serialization/deserialization for ExecuteTx fields
+- **Signature Recovery**: ECDSA signature verification and sender address recovery
+- **L1 Forwarding**: Automatic forwarding to L1 geth via `eth_sendRawTransaction`
+- **Minimal Validation**: Only signature check for deduplication (full validation done by L1 geth)
+
+ExecuteTx transactions include:
+- Standard EIP-1559 fields (chainId, nonce, gas, gasTipCap, gasFeeCap, value, to, data)
+- ExecuteTx-specific fields (preStateHash, witness, withdrawals, coinbase, blockNumber, timestamp, blobHashes)
+- Signature components (v, r, s)
+
+See `src/core/transaction_execute.zig` for the complete implementation.
 
 ## Known Issues & Workarounds
 
@@ -531,36 +558,6 @@ zig build -Dtarget=x86_64-linux-gnu.2.38
 1. Use a newer Linux distribution (Ubuntu 24.04+ or equivalent)
 2. Build in a container with glibc 2.38+
 3. Use the Docker build which includes the correct glibc version
-
-### Zig 0.14.x HashMap Allocator Bug (RESOLVED)
-
-**Status**: ✅ **RESOLVED** - Custom U256 implementation workaround implemented
-
-This project encountered a compiler bug in Zig 0.14.x related to HashMap initialization with native `u256` types as keys. The error manifests as:
-```
-error: access of union field 'pointer' while field 'int' is active
-at std/mem/Allocator.zig:425:45
-```
-
-**Root Cause**: The bug is in HashMap's `AutoContext` type introspection code when handling large integer types (`u256`). This is a compiler bug, not an issue with our code.
-
-**Solution**: We implemented a custom `U256` struct using two `u128` fields with explicit `hash()` and `eql()` methods, along with custom HashMap contexts (`HashContext`, `AddressContext`). This bypasses the problematic `AutoContext` code path entirely.
-
-**Implementation Details**:
-- Custom `U256` struct in `src/core/types.zig` with two `u128` fields (`low`, `high`)
-- Custom hash function combining both halves via XOR
-- Custom equality comparison
-- Custom HashMap contexts for `Hash` and `Address` types
-- Full compatibility with 32-byte hashes and 20-byte addresses
-
-**Performance**: No performance penalty - the struct is stack-allocated and operations are efficient.
-
-See `src/core/types.zig` for detailed comments explaining the implementation.
-
-### Zig 0.14.x Allocator Bug (Historical)
-
-This project previously encountered allocator bugs in Zig 0.14.0 and 0.14.1 related to allocating arrays of structs containing slices. **Verified through testing**: The bug exists in both versions (at different line numbers: 400 vs 412). The issue was resolved by using a custom `U256` implementation instead of native `u256` types.
-
 
 ## License
 

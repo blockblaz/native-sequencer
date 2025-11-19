@@ -96,13 +96,13 @@ test "signature verification - roundtrip" {
     // Create a test transaction
     const tx = transaction.Transaction{
         .nonce = 1,
-        .gas_price = types.U256.fromU256(1000000000),
+        .gas_price = 1000000000,
         .gas_limit = 21000,
         .to = types.addressFromBytes([_]u8{
             0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00,
             0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x12, 0x34, 0x56, 0x78,
         }),
-        .value = types.U256.fromU256(1000000000000000000),
+        .value = 1000000000000000000,
         .data = &[_]u8{},
         .v = 0,
         .r = [_]u8{0} ** 32,
@@ -111,7 +111,7 @@ test "signature verification - roundtrip" {
 
     // Hash the transaction
     const tx_hash = try tx.hash(allocator);
-    defer allocator.free(tx_hash.toBytes());
+    // Note: hashToBytes returns a stack-allocated array, no need to free
 
     // Sign the transaction
     const sig = try secp256k1.sign(tx_hash, private_key);
@@ -129,7 +129,7 @@ test "signature verification - roundtrip" {
     // Test recovery
     const recovered_address = try signature.recoverAddress(&signed_tx);
     const expected_address = try signed_tx.sender();
-    try testing.expect(recovered_address.eql(expected_address));
+    try testing.expect(recovered_address == expected_address);
 
     // Clean up transaction data
     allocator.free(tx.data);
@@ -143,10 +143,10 @@ test "signature verification - invalid signature" {
     // Create a transaction with invalid signature (zero r)
     var tx = transaction.Transaction{
         .nonce = 1,
-        .gas_price = types.U256.fromU256(1000000000),
+        .gas_price = 1000000000,
         .gas_limit = 21000,
         .to = null,
-        .value = types.U256.fromU256(0),
+        .value = 0,
         .data = &[_]u8{},
         .v = 27,
         .r = [_]u8{0} ** 32, // Invalid: zero r
@@ -165,10 +165,10 @@ test "signature verification - invalid v value" {
     // Create a transaction with invalid v value
     var tx = transaction.Transaction{
         .nonce = 1,
-        .gas_price = types.U256.fromU256(1000000000),
+        .gas_price = 1000000000,
         .gas_limit = 21000,
         .to = null,
-        .value = types.U256.fromU256(0),
+        .value = 0,
         .data = &[_]u8{},
         .v = 26, // Invalid: < 27
         .r = [_]u8{1} ** 32,

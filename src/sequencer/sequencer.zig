@@ -9,7 +9,7 @@ const execution = @import("execution.zig");
 
 fn formatHash(hash: core.types.Hash) []const u8 {
     // Format hash as hex string for logging
-    const bytes = hash.toBytes();
+    const bytes = core.types.hashToBytes(hash);
     var buffer: [66]u8 = undefined; // "0x" + 64 hex chars
     buffer[0] = '0';
     buffer[1] = 'x';
@@ -90,7 +90,7 @@ pub const Sequencer = struct {
             try valid_txs.append(tx);
 
             // Remove from mempool
-            // tx_hash is U256 struct (not allocated), no need to free
+            // tx_hash is u256 (not allocated), no need to free
             _ = try self.mempool.remove(tx_hash);
         }
 

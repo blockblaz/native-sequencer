@@ -26,7 +26,7 @@ pub const Ingress = struct {
 
         // Check if duplicate in mempool
         const tx_hash = try tx.hash(self.allocator);
-        // tx_hash is U256 struct (not allocated), no need to free
+        // tx_hash is u256 (not allocated), no need to free
         if (self.mempool.contains(tx_hash)) {
             return .duplicate;
         }

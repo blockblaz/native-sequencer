@@ -289,7 +289,7 @@ pub const Database = struct {
 
     /// Helper: Convert address to database key
     fn addressToKey(self: *Database, prefix: []const u8, address: core.types.Address) ![]u8 {
-        const addr_bytes = address.toBytes();
+        const addr_bytes = core.types.addressToBytes(address);
         const prefix_len = prefix.len;
         const key = try self.allocator.alloc(u8, prefix_len + 32);
         @memcpy(key[0..prefix_len], prefix);
@@ -299,7 +299,7 @@ pub const Database = struct {
 
     /// Helper: Convert hash to database key
     fn hashToKey(self: *Database, prefix: []const u8, hash: core.types.Hash) ![]u8 {
-        const hash_bytes = hash.toBytes();
+        const hash_bytes = core.types.hashToBytes(hash);
         const prefix_len = prefix.len;
         const key = try self.allocator.alloc(u8, prefix_len + 32);
         @memcpy(key[0..prefix_len], prefix);
