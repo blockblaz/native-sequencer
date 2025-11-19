@@ -94,11 +94,11 @@ pub fn main() !void {
     // Start API server
     std.log.info("Starting API server...", .{});
     const api_address = try std.net.Address.parseIp(cfg.api_host, cfg.api_port);
-    var api_server = lib.api.server.JsonRpcServer.initWithL1Client(allocator, api_address, cfg.api_host, cfg.api_port, &ingress_handler, &m, &l1_client);
+    var api_server = lib.api.server.JsonRpcServer.initWithSequencer(allocator, api_address, cfg.api_host, cfg.api_port, &ingress_handler, &m, &l1_client, &seq);
 
     // Start sequencing loop in background
     std.log.info("Starting sequencing loop (interval={d}ms)...", .{cfg.batch_interval_ms});
-    var sequencing_thread = try std.Thread.spawn(.{}, sequencingLoop, .{ &seq, &batch_builder, &l1_client, &m, &cfg });
+    var sequencing_thread = try std.Thread.spawn(.{}, sequencingLoop, .{ &seq, &batch_builder, &l1_client, &m, &cfg, &state_manager });
     sequencing_thread.detach();
 
     // Start metrics server
@@ -114,7 +114,7 @@ pub fn main() !void {
     try api_server.start();
 }
 
-fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Builder, l1_client: *lib.l1.Client, m: *lib.metrics.Metrics, cfg: *const lib.config.Config) void {
+fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Builder, l1_client: *lib.l1.Client, m: *lib.metrics.Metrics, cfg: *const lib.config.Config, state_manager: *const lib.state.StateManager) void {
     while (true) {
         std.Thread.sleep(cfg.batch_interval_ms * std.time.ns_per_ms);
 
@@ -141,8 +141,8 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
 
             std.log.info("Submitting batch to L1 ({d} blocks)...", .{batch_data.blocks.len});
 
-            // Submit to L1
-            const batch_hash = l1_client.submitBatch(batch_data) catch |err| {
+            // Submit to L1 (with ExecuteTx support)
+            const batch_hash = l1_client.submitBatch(batch_data, state_manager, seq) catch |err| {
                 std.log.err("Error submitting batch to L1: {any}", .{err});
                 m.incrementL1SubmissionErrors();
                 continue;

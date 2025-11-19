@@ -47,8 +47,24 @@ pub const Config = struct {
         } else |_| {}
 
         if (std.process.getEnvVarOwned(allocator, "SEQUENCER_KEY")) |key_hex| {
-            // Parse hex key (TODO: implement parsing)
-            allocator.free(key_hex);
+            defer allocator.free(key_hex);
+            // Parse hex key (remove 0x prefix if present)
+            const hex_start: usize = if (std.mem.startsWith(u8, key_hex, "0x")) 2 else 0;
+            const hex_data = key_hex[hex_start..];
+
+            if (hex_data.len != 64) {
+                return error.InvalidSequencerKey;
+            }
+
+            var key_bytes: [32]u8 = undefined;
+            var i: usize = 0;
+            while (i < 32) : (i += 1) {
+                const high = try std.fmt.parseInt(u8, hex_data[i * 2 .. i * 2 + 1], 16);
+                const low = try std.fmt.parseInt(u8, hex_data[i * 2 + 1 .. i * 2 + 2], 16);
+                key_bytes[i] = (high << 4) | low;
+            }
+
+            config.sequencer_private_key = key_bytes;
         } else |_| {}
 
         return config;

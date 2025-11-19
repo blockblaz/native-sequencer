@@ -933,6 +933,36 @@ pub const ExecuteTx = struct {
         };
     }
 
+    /// Sign ExecuteTx with private key (EIP-2718 typed transaction)
+    /// Returns a signed ExecuteTx ready for submission
+    pub fn sign(self: *Self, allocator: std.mem.Allocator, private_key: [32]u8, chain_id: u64) !Self {
+        // Compute transaction hash for signing
+        const tx_hash = try self.hash(allocator);
+
+        // Sign with secp256k1
+        const secp256k1_mod = @import("../crypto/secp256k1_wrapper.zig");
+        const priv_key = try secp256k1_mod.PrivateKey.fromBytes(private_key);
+        const sig = try secp256k1_mod.sign(tx_hash, priv_key);
+
+        // Convert signature to u256 format
+        const r_value = types.u256FromBytes(sig.r);
+        const s_value = types.u256FromBytes(sig.s);
+
+        // Calculate v for EIP-155: v = chain_id * 2 + 35 + recovery_id
+        // recovery_id is 0 or 1 (from sig.v: 27 -> 0, 28 -> 1)
+        const recovery_id: u8 = sig.v - 27;
+        const v_value = (@as(u256, chain_id) * 2) + 35 + recovery_id;
+        const v = v_value;
+
+        // Create signed transaction
+        var signed_tx = self.*;
+        signed_tx.r = r_value;
+        signed_tx.s = s_value;
+        signed_tx.v = v;
+
+        return signed_tx;
+    }
+
     /// Free allocated memory
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.data);

@@ -3,6 +3,8 @@
 const std = @import("std");
 const core = @import("../core/root.zig");
 const state = @import("../state/root.zig");
+const types = @import("../core/types.zig");
+const crypto_hash = @import("../crypto/hash.zig");
 
 pub const ExecutionResult = struct {
     success: bool,
@@ -14,16 +16,35 @@ pub const ExecutionResult = struct {
 pub const ExecutionEngine = struct {
     allocator: std.mem.Allocator,
     state_manager: *state.StateManager,
+    /// Optional witness builder for tracking state access
+    witness_builder: ?*core.witness_builder.WitnessBuilder = null,
 
     pub fn init(allocator: std.mem.Allocator, sm: *state.StateManager) ExecutionEngine {
         return .{
             .allocator = allocator,
             .state_manager = sm,
+            .witness_builder = null,
+        };
+    }
+
+    /// Initialize with witness builder for state tracking
+    pub fn initWithWitnessBuilder(allocator: std.mem.Allocator, sm: *state.StateManager, wb: *core.witness_builder.WitnessBuilder) ExecutionEngine {
+        return .{
+            .allocator = allocator,
+            .state_manager = sm,
+            .witness_builder = wb,
         };
     }
 
     pub fn executeTransaction(self: *ExecutionEngine, tx: core.transaction.Transaction) !ExecutionResult {
         const sender = try tx.sender();
+
+        // Track state access for witness generation
+        if (self.witness_builder) |wb| {
+            // Track sender account access (simplified - would track actual trie nodes)
+            const sender_hash = crypto_hash.keccak256(&types.addressToBytes(sender));
+            try wb.trackStateNode(sender_hash);
+        }
 
         // Get current state
         const sender_nonce = try self.state_manager.getNonce(sender);
@@ -82,6 +103,14 @@ pub const ExecutionEngine = struct {
             };
         }
 
+        // Track recipient state access
+        if (tx.to) |to| {
+            if (self.witness_builder) |wb| {
+                const to_hash = crypto_hash.keccak256(&types.addressToBytes(to));
+                try wb.trackStateNode(to_hash);
+            }
+        }
+
         // Execute transaction
         if (tx.to) |to| {
             // Contract call or transfer
@@ -93,6 +122,18 @@ pub const ExecutionEngine = struct {
     }
 
     fn executeCall(self: *ExecutionEngine, tx: core.transaction.Transaction, sender: core.types.Address, to: core.types.Address, gas_used: u64, gas_cost: u256) !ExecutionResult {
+        // Track code access if this is a contract call
+        if (self.witness_builder) |wb| {
+            // In a full implementation, we would:
+            // 1. Check if 'to' is a contract (has code)
+            // 2. Get the contract code
+            // 3. Track it in witness builder
+            // For now, simplified tracking
+            if (tx.data.len > 0) {
+                // Likely a contract call, track code access
+                try wb.trackCode(tx.data);
+            }
+        }
         // Update sender balance
         const sender_balance = try self.state_manager.getBalance(sender);
         const total_cost = tx.value + gas_cost;
