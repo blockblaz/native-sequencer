@@ -12,6 +12,8 @@ pub const JsonRpcServer = struct {
     metrics: *metrics.Metrics,
     http_server: http.HttpServer,
     l1_client: ?*l1.Client = null,
+    /// Optional sequencer reference for witness generation testing
+    sequencer: ?*@import("../sequencer/root.zig").Sequencer = null,
 
     pub fn init(allocator: std.mem.Allocator, addr: std.net.Address, host: []const u8, port: u16, ing: *validation.ingress.Ingress, m: *metrics.Metrics) JsonRpcServer {
         return .{
@@ -30,6 +32,18 @@ pub const JsonRpcServer = struct {
             .metrics = m,
             .http_server = http.HttpServer.init(allocator, addr, host, port),
             .l1_client = l1_cli,
+            .sequencer = null,
+        };
+    }
+
+    pub fn initWithSequencer(allocator: std.mem.Allocator, addr: std.net.Address, host: []const u8, port: u16, ing: *validation.ingress.Ingress, m: *metrics.Metrics, l1_cli: *l1.Client, seq: *@import("../sequencer/root.zig").Sequencer) JsonRpcServer {
+        return .{
+            .allocator = allocator,
+            .ingress_handler = ing,
+            .metrics = m,
+            .http_server = http.HttpServer.init(allocator, addr, host, port),
+            .l1_client = l1_cli,
+            .sequencer = seq,
         };
     }
 
@@ -101,6 +115,10 @@ pub const JsonRpcServer = struct {
             return try self.handleGetTransactionReceipt(&request);
         } else if (std.mem.eql(u8, request.method, "eth_blockNumber")) {
             return try self.handleBlockNumber(&request);
+        } else if (std.mem.eql(u8, request.method, "debug_generateWitness")) {
+            return try self.handleGenerateWitness(&request);
+        } else if (std.mem.eql(u8, request.method, "debug_generateBlockWitness")) {
+            return try self.handleGenerateBlockWitness(&request);
         } else {
             return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.MethodNotFound, "Method not found");
         }
@@ -260,6 +278,204 @@ pub const JsonRpcServer = struct {
         const block_num_hex = try std.fmt.allocPrint(self.allocator, "0x0", .{});
         defer self.allocator.free(block_num_hex);
         const result_value = std.json.Value{ .string = block_num_hex };
+        return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
+    }
+
+    /// Generate witness for a transaction (debug endpoint for testing)
+    /// Params: ["0x<raw_transaction_hex>"]
+    /// Returns: { "witness": "0x<rlp_encoded_witness>", "witnessSize": <size> }
+    fn handleGenerateWitness(self: *JsonRpcServer, request: *const jsonrpc.JsonRpcRequest) ![]u8 {
+        if (self.sequencer == null) {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Sequencer not available for witness generation");
+        }
+
+        const sequencer = self.sequencer.?;
+
+        // Parse params
+        const params = request.params orelse {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing params");
+        };
+
+        const params_array = switch (params) {
+            .array => |arr| arr,
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid params - expected array");
+            },
+        };
+
+        if (params_array.items.len == 0) {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing transaction data");
+        }
+
+        // Get transaction hex
+        const first_param = params_array.items[0];
+        const tx_hex = switch (first_param) {
+            .string => |s| s,
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction format");
+            },
+        };
+
+        // Decode hex string
+        const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
+        const hex_data = tx_hex[hex_start..];
+
+        var tx_bytes = std.ArrayList(u8).init(self.allocator);
+        defer tx_bytes.deinit();
+
+        var i: usize = 0;
+        while (i < hex_data.len) : (i += 2) {
+            if (i + 1 >= hex_data.len) break;
+            const byte = try std.fmt.parseInt(u8, hex_data[i .. i + 2], 16);
+            try tx_bytes.append(byte);
+        }
+
+        const tx_bytes_slice = try tx_bytes.toOwnedSlice();
+        defer self.allocator.free(tx_bytes_slice);
+
+        // Parse transaction (only legacy transactions for now)
+        const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction encoding");
+        };
+        defer self.allocator.free(tx.data);
+
+        // Initialize witness builder
+        var witness_builder = core.witness_builder.WitnessBuilder.init(self.allocator);
+        defer witness_builder.deinit();
+
+        // Create execution engine with witness builder
+        var exec_engine = sequencer.execution_engine;
+        exec_engine.witness_builder = &witness_builder;
+
+        // Execute transaction (this will track state access)
+        _ = exec_engine.executeTransaction(tx) catch |err| {
+            std.log.warn("Transaction execution failed during witness generation: {any}", .{err});
+            // Continue anyway to generate witness from what was tracked
+        };
+
+        // Build witness
+        _ = try witness_builder.buildWitness(sequencer.state_manager, null);
+
+        // Encode witness to RLP
+        const witness_rlp = try witness_builder.witness.encodeRLP(self.allocator);
+        defer self.allocator.free(witness_rlp);
+
+        // Convert to hex
+        var hex_buf = std.ArrayList(u8).init(self.allocator);
+        defer hex_buf.deinit();
+        try hex_buf.appendSlice("0x");
+        for (witness_rlp) |byte| {
+            const hex_digits = "0123456789abcdef";
+            try hex_buf.append(hex_digits[byte >> 4]);
+            try hex_buf.append(hex_digits[byte & 0xf]);
+        }
+        const witness_hex = try hex_buf.toOwnedSlice();
+        defer self.allocator.free(witness_hex);
+
+        // Create response object
+        var result_obj = std.json.ObjectMap.init(self.allocator);
+        errdefer result_obj.deinit();
+        try result_obj.put("witness", std.json.Value{ .string = witness_hex });
+        try result_obj.put("witnessSize", std.json.Value{ .integer = @as(i64, @intCast(witness_rlp.len)) });
+
+        const result_value = std.json.Value{ .object = result_obj };
+        return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
+    }
+
+    /// Generate witness for a block (debug endpoint for testing)
+    /// Params: [block_number] or ["latest"]
+    /// Returns: { "witness": "0x<rlp_encoded_witness>", "witnessSize": <size>, "blockNumber": <number> }
+    fn handleGenerateBlockWitness(self: *JsonRpcServer, request: *const jsonrpc.JsonRpcRequest) ![]u8 {
+        if (self.sequencer == null) {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Sequencer not available for witness generation");
+        }
+
+        const sequencer = self.sequencer.?;
+
+        // Parse params
+        const params = request.params orelse {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing params");
+        };
+
+        const params_array = switch (params) {
+            .array => |arr| arr,
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid params - expected array");
+            },
+        };
+
+        if (params_array.items.len == 0) {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing block number");
+        }
+
+        // Get block number
+        const first_param = params_array.items[0];
+        const block_param = switch (first_param) {
+            .string => |s| s,
+            .integer => |i| {
+                // Convert integer to hex string
+                const hex_str = try std.fmt.allocPrint(self.allocator, "0x{x}", .{i});
+                defer self.allocator.free(hex_str);
+                return hex_str;
+            },
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid block number format");
+            },
+        };
+
+        // Parse block number (for future use when fetching from storage)
+        const hex_start: usize = if (std.mem.startsWith(u8, block_param, "0x")) 2 else 0;
+        const hex_data = block_param[hex_start..];
+
+        _ = if (std.mem.eql(u8, block_param, "latest") or std.mem.eql(u8, hex_data, "latest")) blk: {
+            // Use latest block number (current_block_number - 1 since we increment after building)
+            break :blk if (sequencer.current_block_number > 0) sequencer.current_block_number - 1 else 0;
+        } else blk: {
+            if (hex_data.len == 0) return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid block number");
+            break :blk try std.fmt.parseInt(u64, hex_data, 16);
+        };
+
+        // For now, we'll build a block from the mempool and generate witness for it
+        // In production, you would fetch the block from storage based on block_number
+        const block = sequencer.buildBlock() catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Failed to build block");
+        };
+
+        // Initialize witness builder
+        var witness_builder = core.witness_builder.WitnessBuilder.init(self.allocator);
+        defer witness_builder.deinit();
+
+        // Generate witness for the block
+        try witness_builder.generateBlockWitness(&block, &sequencer.execution_engine);
+
+        // Build witness
+        _ = try witness_builder.buildWitness(sequencer.state_manager, null);
+
+        // Encode witness to RLP
+        const witness_rlp = try witness_builder.witness.encodeRLP(self.allocator);
+        defer self.allocator.free(witness_rlp);
+
+        // Convert to hex
+        var hex_buf = std.ArrayList(u8).init(self.allocator);
+        defer hex_buf.deinit();
+        try hex_buf.appendSlice("0x");
+        for (witness_rlp) |byte| {
+            const hex_digits = "0123456789abcdef";
+            try hex_buf.append(hex_digits[byte >> 4]);
+            try hex_buf.append(hex_digits[byte & 0xf]);
+        }
+        const witness_hex = try hex_buf.toOwnedSlice();
+        defer self.allocator.free(witness_hex);
+
+        // Create response object
+        var result_obj = std.json.ObjectMap.init(self.allocator);
+        errdefer result_obj.deinit();
+        try result_obj.put("witness", std.json.Value{ .string = witness_hex });
+        try result_obj.put("witnessSize", std.json.Value{ .integer = @as(i64, @intCast(witness_rlp.len)) });
+        try result_obj.put("blockNumber", std.json.Value{ .integer = @as(i64, @intCast(block.number)) });
+        try result_obj.put("transactionCount", std.json.Value{ .integer = @as(i64, @intCast(block.transactions.len)) });
+
+        const result_value = std.json.Value{ .object = result_obj };
         return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
     }
 };

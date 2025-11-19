@@ -47,14 +47,14 @@ pub fn build(b: *std.Build) void {
     sequencer_module.addImport("secp256k1", secp256k1_mod);
 
     // Add RocksDB dependency (using Syndica/rocksdb-zig like zeam)
-    // Note: RocksDB doesn't support Windows, so we conditionally include it
-    const is_windows = target.result.os.tag == .windows;
-    if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{
-            .target = target,
-        });
-        sequencer_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
-    }
+    // Note: RocksDB is disabled for now
+    // const is_windows = target.result.os.tag == .windows;
+    // if (!is_windows) {
+    //     const dep_rocksdb = b.dependency("rocksdb", .{
+    //         .target = target,
+    //     });
+    //     sequencer_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    // }
 
     // Library
     const lib = b.addLibrary(.{
@@ -64,20 +64,20 @@ pub fn build(b: *std.Build) void {
     });
     // Link secp256k1 library
     lib.linkLibrary(libsecp256k1);
-    // Add RocksDB module and link library (only on non-Windows)
-    if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{
-            .target = target,
-        });
-        lib.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
-        lib.linkLibrary(dep_rocksdb.artifact("rocksdb"));
-        lib.linkLibCpp(); // RocksDB requires C++ standard library
-        lib.linkSystemLibrary("pthread"); // Required for pthread functions
-        // librt is Linux-specific (gettid, etc.) - not needed on macOS
-        if (target.result.os.tag == .linux) {
-            lib.linkSystemLibrary("rt");
-        }
-    }
+    // Add RocksDB module and link library (disabled for now)
+    // if (!is_windows) {
+    //     const dep_rocksdb = b.dependency("rocksdb", .{
+    //         .target = target,
+    //     });
+    //     lib.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    //     lib.linkLibrary(dep_rocksdb.artifact("rocksdb"));
+    //     lib.linkLibCpp(); // RocksDB requires C++ standard library
+    //     lib.linkSystemLibrary("pthread"); // Required for pthread functions
+    //     // librt is Linux-specific (gettid, etc.) - not needed on macOS
+    //     if (target.result.os.tag == .linux) {
+    //         lib.linkSystemLibrary("rt");
+    //     }
+    // }
     lib.linkLibC();
     b.installArtifact(lib);
 
@@ -94,20 +94,20 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     exe.linkLibrary(libsecp256k1);
-    // Add RocksDB module and link library (only on non-Windows)
-    if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{
-            .target = target,
-        });
-        exe.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
-        exe.linkLibrary(dep_rocksdb.artifact("rocksdb"));
-        exe.linkLibCpp(); // RocksDB requires C++ standard library
-        exe.linkSystemLibrary("pthread"); // Required for pthread functions
-        // librt is Linux-specific (gettid, etc.) - not needed on macOS
-        if (target.result.os.tag == .linux) {
-            exe.linkSystemLibrary("rt");
-        }
-    }
+    // Add RocksDB module and link library (disabled for now)
+    // if (!is_windows) {
+    //     const dep_rocksdb = b.dependency("rocksdb", .{
+    //         .target = target,
+    //     });
+    //     exe.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    //     exe.linkLibrary(dep_rocksdb.artifact("rocksdb"));
+    //     exe.linkLibCpp(); // RocksDB requires C++ standard library
+    //     exe.linkSystemLibrary("pthread"); // Required for pthread functions
+    //     // librt is Linux-specific (gettid, etc.) - not needed on macOS
+    //     if (target.result.os.tag == .linux) {
+    //         exe.linkSystemLibrary("rt");
+    //     }
+    // }
     exe.linkLibC();
 
     b.installArtifact(exe);
@@ -133,20 +133,20 @@ pub fn build(b: *std.Build) void {
     unit_tests.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     unit_tests.linkLibrary(libsecp256k1);
-    // Add RocksDB module and link library (only on non-Windows)
-    if (!is_windows) {
-        const dep_rocksdb = b.dependency("rocksdb", .{
-            .target = target,
-        });
-        unit_tests.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
-        unit_tests.linkLibrary(dep_rocksdb.artifact("rocksdb"));
-        unit_tests.linkLibCpp(); // RocksDB requires C++ standard library
-        unit_tests.linkSystemLibrary("pthread"); // Required for pthread functions
-        // librt is Linux-specific (gettid, etc.) - not needed on macOS
-        if (target.result.os.tag == .linux) {
-            unit_tests.linkSystemLibrary("rt");
-        }
-    }
+    // Add RocksDB module and link library (disabled for now)
+    // if (!is_windows) {
+    //     const dep_rocksdb = b.dependency("rocksdb", .{
+    //         .target = target,
+    //     });
+    //     unit_tests.root_module.addImport("rocksdb", dep_rocksdb.module("bindings"));
+    //     unit_tests.linkLibrary(dep_rocksdb.artifact("rocksdb"));
+    //     unit_tests.linkLibCpp(); // RocksDB requires C++ standard library
+    //     unit_tests.linkSystemLibrary("pthread"); // Required for pthread functions
+    //     // librt is Linux-specific (gettid, etc.) - not needed on macOS
+    //     if (target.result.os.tag == .linux) {
+    //         unit_tests.linkSystemLibrary("rt");
+    //     }
+    // }
     unit_tests.linkLibC();
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");

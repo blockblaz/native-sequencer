@@ -7,13 +7,33 @@ pub const Client = struct {
     allocator: std.mem.Allocator,
     config: *const config.Config,
     l1_chain_id: u64,
+    sequencer_private_key: ?[32]u8 = null,
+    sequencer_address: ?core.types.Address = null,
+    execute_tx_builder: ?@import("execute_tx_builder.zig").ExecuteTxBuilder = null,
 
     pub fn init(allocator: std.mem.Allocator, cfg: *const config.Config) Client {
-        return .{
+        var client = Client{
             .allocator = allocator,
             .config = cfg,
             .l1_chain_id = cfg.l1_chain_id,
+            .sequencer_private_key = cfg.sequencer_private_key,
+            .sequencer_address = null,
+            .execute_tx_builder = null,
         };
+
+        // Derive sequencer address from private key if available
+        if (cfg.sequencer_private_key) |key| {
+            const secp256k1_mod = @import("../crypto/secp256k1_wrapper.zig");
+            const priv_key = secp256k1_mod.PrivateKey.fromBytes(key) catch null;
+            if (priv_key) |pk| {
+                const pub_key = secp256k1_mod.derivePublicKey(pk) catch null;
+                if (pub_key) |pubkey| {
+                    client.sequencer_address = pubkey.toAddress();
+                }
+            }
+        }
+
+        return client;
     }
 
     pub fn deinit(self: *Client) void {
@@ -21,7 +41,62 @@ pub const Client = struct {
         // No cleanup needed for simplified implementation
     }
 
-    pub fn submitBatch(self: *Client, batch: core.batch.Batch) !core.types.Hash {
+    pub fn submitBatch(self: *Client, batch: core.batch.Batch, state_manager: *const @import("../state/root.zig").StateManager, sequencer: *const @import("../sequencer/root.zig").Sequencer) !core.types.Hash {
+        // Use ExecuteTx for batch submission if sequencer key is configured
+        // Only use ExecuteTx if we can successfully get nonce (L1 RPC is available)
+        if (self.sequencer_private_key) |key| {
+            // Try to use ExecuteTx, but fall back to legacy if L1 RPC fails
+            return self.submitBatchAsExecuteTx(batch, state_manager, sequencer, key) catch |err| {
+                std.log.warn("ExecuteTx submission failed, falling back to legacy: {any}", .{err});
+                return try self.submitBatchLegacy(batch);
+            };
+        } else {
+            // Fallback to legacy batch submission
+            return try self.submitBatchLegacy(batch);
+        }
+    }
+
+    /// Submit batch as ExecuteTx transaction
+    fn submitBatchAsExecuteTx(self: *Client, batch: core.batch.Batch, state_manager: *const @import("../state/root.zig").StateManager, sequencer: *const @import("../sequencer/root.zig").Sequencer, private_key: [32]u8) !core.types.Hash {
+        // Get sequencer address
+        const sequencer_addr = self.sequencer_address orelse {
+            return error.SequencerAddressNotAvailable;
+        };
+
+        // Initialize ExecuteTx builder if not already done
+        if (self.execute_tx_builder == null) {
+            self.execute_tx_builder = @import("execute_tx_builder.zig").ExecuteTxBuilder.init(self.allocator, self.l1_chain_id, sequencer_addr);
+        }
+        const builder = &self.execute_tx_builder.?;
+
+        // Get nonce from L1 (simplified - in production fetch from L1)
+        const nonce = try self.getNonce(sequencer_addr);
+
+        // Build ExecuteTx from batch
+        var execute_tx = try builder.buildExecuteTxFromBatch(
+            &batch,
+            state_manager,
+            sequencer,
+            nonce,
+            2_000_000_000, // 2 gwei gas tip cap
+            100_000_000_000, // 100 gwei gas fee cap
+            10_000_000, // 10M gas limit
+        );
+        defer execute_tx.deinit(self.allocator);
+
+        // Sign ExecuteTx
+        var signed_tx = try execute_tx.sign(self.allocator, private_key, self.l1_chain_id);
+        defer signed_tx.deinit(self.allocator);
+
+        // Serialize and submit
+        const raw_tx = try signed_tx.serialize(self.allocator);
+        defer self.allocator.free(raw_tx);
+
+        return try self.sendTransaction(raw_tx);
+    }
+
+    /// Legacy batch submission (for backward compatibility)
+    fn submitBatchLegacy(self: *Client, batch: core.batch.Batch) !core.types.Hash {
         // Serialize batch
         const calldata = try batch.serialize(self.allocator);
         defer self.allocator.free(calldata);
@@ -36,6 +111,37 @@ pub const Client = struct {
         const tx_hash = try self.sendTransaction(signed_tx);
 
         return tx_hash;
+    }
+
+    /// Get nonce for sequencer address from L1
+    fn getNonce(self: *Client, address: core.types.Address) !u64 {
+        const addr_bytes = core.types.addressToBytes(address);
+        const addr_hex = try self.bytesToHex(&addr_bytes);
+        defer self.allocator.free(addr_hex);
+
+        const hex_value = try std.fmt.allocPrint(self.allocator, "0x{s}", .{addr_hex});
+        defer self.allocator.free(hex_value);
+
+        var params = std.json.Array.init(self.allocator);
+        defer params.deinit();
+        try params.append(std.json.Value{ .string = hex_value });
+        try params.append(std.json.Value{ .string = "latest" });
+
+        const result = try self.callRpc("eth_getTransactionCount", std.json.Value{ .array = params });
+        defer self.allocator.free(result);
+
+        // Parse result
+        const parsed = try std.json.parseFromSliceLeaky(
+            struct { result: []const u8 },
+            self.allocator,
+            result,
+            .{},
+        );
+
+        // Convert hex string to u64
+        const hex_str = parsed.result;
+        const hex_start: usize = if (std.mem.startsWith(u8, hex_str, "0x")) 2 else 0;
+        return try std.fmt.parseInt(u64, hex_str[hex_start..], 16);
     }
 
     pub const ConditionalOptions = struct {
