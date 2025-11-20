@@ -32,7 +32,9 @@ logs/
 # Runtime files
 mempool.wal
 state.db
+state.db-lock
 *.db
+*.db-lock
 
 # Test artifacts
 test-results/

@@ -8,10 +8,10 @@ pub const StateManager = struct {
     balances: std.HashMap(core.types.Address, u256, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
     receipts: std.HashMap(core.types.Hash, core.receipt.Receipt, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
     current_block_number: u64 = 0,
-    db: ?*persistence.rocksdb.Database = null,
+    db: ?*persistence.lmdb.Database = null,
     use_persistence: bool = false,
 
-    /// Initialize StateManager with optional RocksDB persistence
+    /// Initialize StateManager with optional LMDB persistence
     pub fn init(allocator: std.mem.Allocator) StateManager {
         return .{
             .allocator = allocator,
@@ -23,8 +23,8 @@ pub const StateManager = struct {
         };
     }
 
-    /// Initialize StateManager with RocksDB persistence
-    pub fn initWithPersistence(allocator: std.mem.Allocator, db: *persistence.rocksdb.Database) !StateManager {
+    /// Initialize StateManager with LMDB persistence
+    pub fn initWithPersistence(allocator: std.mem.Allocator, db: *persistence.lmdb.Database) !StateManager {
         var sm = init(allocator);
         sm.db = db;
         sm.use_persistence = true;
@@ -35,7 +35,7 @@ pub const StateManager = struct {
         return sm;
     }
 
-    /// Load state from RocksDB database
+    /// Load state from LMDB database
     fn loadFromDatabase(self: *StateManager) !void {
         if (self.db == null) return;
 
@@ -50,7 +50,7 @@ pub const StateManager = struct {
         // Note: Loading all nonces/balances/receipts into memory would be expensive
         // For now, we load on-demand. In production, consider using iterators or
         // loading only frequently accessed data
-        std.log.info("State manager initialized with RocksDB persistence", .{});
+        std.log.info("State manager initialized with LMDB persistence", .{});
     }
 
     pub fn deinit(self: *StateManager) void {

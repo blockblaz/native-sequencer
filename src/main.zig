@@ -33,9 +33,9 @@ pub fn main() !void {
     // Initialize components
     std.log.info("Initializing sequencer components...", .{});
 
-    // Initialize RocksDB database - stored on disk at cfg.state_db_path
+    // Initialize LMDB database - stored on disk at cfg.state_db_path
     // Database is returned by value (like zeam), not a pointer
-    var state_db: ?lib.persistence.rocksdb.Database = null;
+    var state_db: ?lib.persistence.lmdb.Database = null;
     var state_manager: lib.state.StateManager = undefined;
 
     // Check if STATE_DB_PATH is set or if default path should be used
@@ -50,22 +50,17 @@ pub fn main() !void {
     };
 
     if (use_persistence) {
-        // Open RocksDB database (stored on disk, not in-memory)
-        // Not supported on Windows - falls back to in-memory state
+        // Open LMDB database (stored on disk, not in-memory)
         // Open database - returns Database by value (like zeam), not a pointer
-        const db_result = lib.persistence.rocksdb.Database.open(allocator, cfg.state_db_path);
+        const db_result = lib.persistence.lmdb.Database.open(allocator, cfg.state_db_path);
         if (db_result) |db| {
             state_db = db;
-            std.log.info("Initializing state manager with RocksDB persistence at {s}", .{cfg.state_db_path});
+            std.log.info("Initializing state manager with LMDB persistence at {s}", .{cfg.state_db_path});
             state_manager = try lib.state.StateManager.initWithPersistence(allocator, &state_db.?);
         } else |err| {
-            if (err == error.UnsupportedPlatform) {
-                std.log.warn("RocksDB persistence not supported on Windows, falling back to in-memory state", .{});
-                state_db = null;
-                state_manager = lib.state.StateManager.init(allocator);
-            } else {
-                return err;
-            }
+            std.log.warn("LMDB persistence failed: {any}, falling back to in-memory state", .{err});
+            state_db = null;
+            state_manager = lib.state.StateManager.init(allocator);
         }
     } else {
         // Use in-memory state manager (no persistence)

@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     ca-certificates \
+    liblmdb-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Zig 0.14.1
@@ -51,9 +52,10 @@ RUN --mount=type=cache,target=/root/.cache/zig \
 # Stage 2: Runtime stage
 FROM ubuntu:22.04
 
-# Install runtime dependencies (minimal - just libc)
+# Install runtime dependencies (minimal - just libc and LMDB)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    liblmdb0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

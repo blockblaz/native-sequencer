@@ -1,14 +1,14 @@
-// Witness storage in RocksDB for efficient witness data management
+// Witness storage in LMDB for efficient witness data management
 
 const std = @import("std");
 const core = @import("../core/root.zig");
 const types = @import("../core/types.zig");
 const witness = @import("../core/witness.zig");
-const rocksdb_module = @import("rocksdb.zig");
+const lmdb_module = @import("lmdb.zig");
 
 pub const WitnessStorage = struct {
     allocator: std.mem.Allocator,
-    db: *rocksdb_module.Database,
+    db: *lmdb_module.Database,
 
     const Self = @This();
 
@@ -18,7 +18,7 @@ pub const WitnessStorage = struct {
     const CODE_PREFIX: []const u8 = "code:";
     const HEADER_PREFIX: []const u8 = "header:";
 
-    pub fn init(allocator: std.mem.Allocator, db: *rocksdb_module.Database) Self {
+    pub fn init(allocator: std.mem.Allocator, db: *lmdb_module.Database) Self {
         return .{
             .allocator = allocator,
             .db = db,
@@ -30,7 +30,7 @@ pub const WitnessStorage = struct {
         // No cleanup needed - db is managed externally
     }
 
-    /// Store witness data in RocksDB
+    /// Store witness data in LMDB
     pub fn storeWitness(self: *Self, witness_data: *const witness.Witness, witness_id: types.Hash) !void {
         // Serialize witness to RLP
         const witness_rlp = try witness_data.encodeRLP(self.allocator);
@@ -43,13 +43,13 @@ pub const WitnessStorage = struct {
         try self.db.put(key, witness_rlp);
     }
 
-    /// Retrieve witness data from RocksDB
+    /// Retrieve witness data from LMDB
     pub fn getWitness(self: *Self, witness_id: types.Hash) !?witness.Witness {
         const key = try self.witnessKey(witness_id);
         defer self.allocator.free(key);
 
         const witness_data_opt = self.db.get(key) catch |err| {
-            if (err == rocksdb_module.RocksDBError.KeyNotFound) {
+            if (err == lmdb_module.LMDBError.KeyNotFound) {
                 return null;
             }
             return err;
@@ -63,7 +63,7 @@ pub const WitnessStorage = struct {
         return decoded.witness;
     }
 
-    /// Store state trie node in RocksDB
+    /// Store state trie node in LMDB
     pub fn storeStateNode(self: *Self, node_hash: types.Hash, node_data: []const u8) !void {
         const key = try self.stateNodeKey(node_hash);
         defer self.allocator.free(key);
@@ -74,13 +74,13 @@ pub const WitnessStorage = struct {
         try self.db.put(key, node_data_copy);
     }
 
-    /// Retrieve state trie node from RocksDB
+    /// Retrieve state trie node from LMDB
     pub fn getStateNode(self: *Self, node_hash: types.Hash) !?[]const u8 {
         const key = try self.stateNodeKey(node_hash);
         defer self.allocator.free(key);
 
         const node_data_opt = self.db.get(key) catch |err| {
-            if (err == rocksdb_module.RocksDBError.KeyNotFound) {
+            if (err == lmdb_module.LMDBError.KeyNotFound) {
                 return null;
             }
             return err;
@@ -93,7 +93,7 @@ pub const WitnessStorage = struct {
         return try self.allocator.dupe(u8, node_data.data);
     }
 
-    /// Store contract code in RocksDB
+    /// Store contract code in LMDB
     pub fn storeCode(self: *Self, code_hash: types.Hash, code: []const u8) !void {
         const key = try self.codeKey(code_hash);
         defer self.allocator.free(key);
@@ -104,13 +104,13 @@ pub const WitnessStorage = struct {
         try self.db.put(key, code_copy);
     }
 
-    /// Retrieve contract code from RocksDB
+    /// Retrieve contract code from LMDB
     pub fn getCode(self: *Self, code_hash: types.Hash) !?[]const u8 {
         const key = try self.codeKey(code_hash);
         defer self.allocator.free(key);
 
         const code_data_opt = self.db.get(key) catch |err| {
-            if (err == rocksdb_module.RocksDBError.KeyNotFound) {
+            if (err == lmdb_module.LMDBError.KeyNotFound) {
                 return null;
             }
             return err;
@@ -123,7 +123,7 @@ pub const WitnessStorage = struct {
         return try self.allocator.dupe(u8, code_data.data);
     }
 
-    /// Store block header in RocksDB
+    /// Store block header in LMDB
     pub fn storeHeader(self: *Self, block_number: u64, header: *const witness.BlockHeader) !void {
         const key = try self.headerKey(block_number);
         defer self.allocator.free(key);
@@ -135,13 +135,13 @@ pub const WitnessStorage = struct {
         try self.db.put(key, header_rlp);
     }
 
-    /// Retrieve block header from RocksDB
+    /// Retrieve block header from LMDB
     pub fn getHeader(self: *Self, block_number: u64) !?witness.BlockHeader {
         const key = try self.headerKey(block_number);
         defer self.allocator.free(key);
 
         const header_data_opt = self.db.get(key) catch |err| {
-            if (err == rocksdb_module.RocksDBError.KeyNotFound) {
+            if (err == lmdb_module.LMDBError.KeyNotFound) {
                 return null;
             }
             return err;
@@ -158,11 +158,11 @@ pub const WitnessStorage = struct {
     /// Cache frequently accessed state data
     /// This maintains an in-memory cache for hot data
     pub fn cacheStateNode(self: *Self, node_hash: types.Hash, node_data: []const u8) !void {
-        // Store in RocksDB (which acts as persistent cache)
+        // Store in LMDB (which acts as persistent cache)
         try self.storeStateNode(node_hash, node_data);
     }
 
-    /// Query RocksDB for state trie nodes
+    /// Query LMDB for state trie nodes
     /// Returns all state nodes matching the given prefix (for trie traversal)
     pub fn queryStateNodes(self: *Self, prefix_hash: types.Hash) !std.ArrayList([]const u8) {
         _ = prefix_hash; // TODO: Use prefix_hash for prefix matching
