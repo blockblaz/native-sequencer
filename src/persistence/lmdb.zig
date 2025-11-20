@@ -3,7 +3,51 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("../core/root.zig");
-const c = @cImport({
+
+// LMDB is not available on Windows - use conditional compilation
+const c = if (builtin.target.os.tag == .windows) struct {
+    pub const MDB_env = struct {};
+    pub const MDB_txn = struct {};
+    pub const MDB_dbi = u32;
+    pub const MDB_val = struct {
+        mv_size: usize,
+        mv_data: ?*anyopaque,
+    };
+    pub const MDB_SUCCESS = 0;
+    pub const MDB_NOTFOUND = 1;
+    pub const MDB_NOSUBDIR = 0x4000;
+    pub const MDB_RDONLY = 0x20000;
+    pub const MDB_CREATE = 0x40000;
+    pub fn mdb_env_create(_: *?*MDB_env) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_env_set_mapsize(_: ?*MDB_env, _: c_ulong) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_env_open(_: ?*MDB_env, _: [*c]const u8, _: c_uint, _: c_uint) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_env_close(_: ?*MDB_env) void {}
+    pub fn mdb_txn_begin(_: ?*MDB_env, _: ?*MDB_txn, _: c_uint, _: *?*MDB_txn) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_txn_commit(_: ?*MDB_txn) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_txn_abort(_: ?*MDB_txn) void {}
+    pub fn mdb_dbi_open(_: ?*MDB_txn, _: ?[*c]const u8, _: c_uint, _: *MDB_dbi) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_put(_: ?*MDB_txn, _: MDB_dbi, _: *MDB_val, _: *MDB_val, _: c_uint) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_get(_: ?*MDB_txn, _: MDB_dbi, _: *MDB_val, _: *MDB_val) c_int {
+        return 1; // Error
+    }
+    pub fn mdb_del(_: ?*MDB_txn, _: MDB_dbi, _: *MDB_val, _: ?*MDB_val) c_int {
+        return 1; // Error
+    }
+} else @cImport({
     @cInclude("lmdb.h");
 });
 
@@ -15,6 +59,7 @@ pub const LMDBError = error{
     KeyNotFound,
     TransactionFailed,
     EnvironmentFailed,
+    UnsupportedPlatform, // Windows is not supported
 } || std.mem.Allocator.Error;
 
 pub const Data = struct {
@@ -34,11 +79,17 @@ pub const Database = struct {
 
     const Self = @This();
 
-    const OpenError = LMDBError || std.posix.MakeDirError || std.fs.Dir.StatFileError;
+    const OpenError = LMDBError || std.posix.MakeDirError || std.fs.Dir.StatFileError || error{UnsupportedPlatform};
 
     /// Open or create an LMDB database
     /// Returns Database by value (like zeam), not a pointer
+    /// Note: On Windows, this will return error.UnsupportedPlatform
     pub fn open(allocator: std.mem.Allocator, path: []const u8) OpenError!Self {
+        // LMDB is not supported on Windows
+        if (builtin.target.os.tag == .windows) {
+            return error.UnsupportedPlatform;
+        }
+
         // Create directory if it doesn't exist
         std.fs.cwd().makePath(path) catch |err| switch (err) {
             error.PathAlreadyExists => {},

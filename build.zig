@@ -8,6 +8,25 @@ pub fn build(b: *std.Build) void {
     const sanitize = b.option(bool, "sanitize", "Enable address sanitizer (default: false)") orelse false;
 
     // LMDB is used for persistence
+    // Helper function to add LMDB linking with cross-compilation support
+    const addLmdbLink = struct {
+        fn add(_: *std.Build, comp: *std.Build.Step.Compile, resolved_target: std.Build.ResolvedTarget) void {
+            // Skip LMDB on Windows (not easily available, use in-memory state instead)
+            if (resolved_target.result.os.tag == .windows) {
+                return;
+            }
+            // Add library search paths for cross-compilation (Linux only)
+            if (resolved_target.result.os.tag == .linux) {
+                // Common paths for cross-compilation libraries
+                // Use cwd_relative for absolute paths
+                comp.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+                comp.addLibraryPath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/lib" });
+            }
+            // For macOS, let Zig's linkSystemLibrary find the library automatically
+            // (Homebrew libraries are in standard locations)
+            comp.linkSystemLibrary("lmdb");
+        }
+    }.add;
 
     // Build libsecp256k1 static C library from vendor directory
     const libsecp256k1_root = b.addModule("secp256k1_lib", .{
@@ -63,8 +82,8 @@ pub fn build(b: *std.Build) void {
     });
     // Link secp256k1 library
     lib.linkLibrary(libsecp256k1);
-    // Link LMDB system library
-    lib.linkSystemLibrary("lmdb");
+    // Link LMDB system library (with cross-compilation support)
+    addLmdbLink(b, lib, target);
     lib.linkLibC();
     if (sanitize) {
         lib.linkSystemLibrary("asan");
@@ -84,8 +103,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     exe.linkLibrary(libsecp256k1);
-    // Link LMDB system library
-    exe.linkSystemLibrary("lmdb");
+    // Link LMDB system library (with cross-compilation support)
+    addLmdbLink(b, exe, target);
     exe.linkLibC();
     if (sanitize) {
         exe.linkSystemLibrary("asan");
@@ -114,8 +133,8 @@ pub fn build(b: *std.Build) void {
     unit_tests.root_module.addImport("secp256k1", secp256k1_mod);
     // Link secp256k1 library
     unit_tests.linkLibrary(libsecp256k1);
-    // Link LMDB system library
-    unit_tests.linkSystemLibrary("lmdb");
+    // Link LMDB system library (with cross-compilation support)
+    addLmdbLink(b, unit_tests, target);
     unit_tests.linkLibC();
     if (sanitize) {
         unit_tests.linkSystemLibrary("asan");
