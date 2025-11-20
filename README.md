@@ -13,7 +13,7 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 ### Why Zig?
 
 - **Predictable, low overhead runtime** with no garbage collection - ideal for latency-sensitive I/O and high throughput
-- **Excellent C interop** - reuse battle-tested C libraries (RocksDB, libsecp256k1, etc.)
+- **Excellent C interop** - reuse battle-tested C libraries (LMDB, libsecp256k1, etc.)
 - **Strong control over memory layout** - enables zero-copy network stacks and deterministic serialization
 - **Modern tooling** - easy cross-compilation for Linux amd64/arm64 containers
 - **Built with Zig 0.14.1** for stability and performance
@@ -77,6 +77,10 @@ The sequencer follows a modular architecture:
 
 - **Zig 0.14.1** ([Install Zig](https://ziglang.org/download/))
 - **C compiler** (for vendored C dependencies)
+- **LMDB** (Lightning Memory-Mapped Database) - for persistence
+  - macOS: `brew install lmdb`
+  - Linux: `sudo apt-get install liblmdb-dev` (Debian/Ubuntu) or `sudo yum install lmdb-devel` (RHEL/CentOS)
+  - Or build from source: https://github.com/LMDB/lmdb
 
 ### Build Commands
 
@@ -453,7 +457,7 @@ This is an experimental implementation. The following features are implemented o
 - ✅ ExecuteTx forwarding to L1 geth
 - ⏳ Complete ECDSA signature verification and recovery (basic implementation)
 - ⏳ Full transaction execution engine
-- ⏳ RocksDB/LMDB integration for persistence
+- ✅ LMDB integration for persistence
 - ⏳ WebSocket/gRPC support for real-time subscriptions
 - ⏳ Complete MEV bundle detection
 - ⏳ Proper error handling and retry logic
@@ -547,7 +551,7 @@ See `src/core/transaction_execute.zig` for the complete implementation.
 
 ### Linux Build Requirements
 
-**glibc Version**: The Linux build requires glibc 2.38 or later due to RocksDB dependencies that use ISO C23 compatibility symbols (`__isoc23_*`). When building for Linux, specify the glibc version:
+**LMDB**: The sequencer uses LMDB for persistence. Make sure LMDB is installed on your system (see Prerequisites section above).
 
 ```bash
 zig build -Dtarget=x86_64-linux-gnu.2.38
