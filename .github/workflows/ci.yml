@@ -53,15 +53,22 @@ jobs:
             liblmdb-dev \
             gcc-x86-64-linux-gnu \
             libc6-dev-amd64-cross
-          # Verify LMDB library exists in standard location
+          # Verify LMDB headers and libraries exist
+          echo "Checking LMDB installation..."
+          ls -la /usr/include/lmdb.h || echo "LMDB header not found in /usr/include"
           ls -la /usr/lib/x86_64-linux-gnu/liblmdb* || echo "LMDB libraries not in standard location"
-          # Create symlinks if needed for cross-compilation
+          # Create symlinks for cross-compilation libraries
           sudo mkdir -p /usr/x86_64-linux-gnu/lib
+          sudo mkdir -p /usr/x86_64-linux-gnu/include
           if [ -f /usr/lib/x86_64-linux-gnu/liblmdb.so ]; then
             sudo ln -sf /usr/lib/x86_64-linux-gnu/liblmdb.so /usr/x86_64-linux-gnu/lib/liblmdb.so || true
           fi
           if [ -f /usr/lib/x86_64-linux-gnu/liblmdb.a ]; then
             sudo ln -sf /usr/lib/x86_64-linux-gnu/liblmdb.a /usr/x86_64-linux-gnu/lib/liblmdb.a || true
+          fi
+          # Symlink headers for cross-compilation
+          if [ -f /usr/include/lmdb.h ]; then
+            sudo ln -sf /usr/include/lmdb.h /usr/x86_64-linux-gnu/include/lmdb.h || true
           fi
       
       - name: Setup Zig

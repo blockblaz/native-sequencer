@@ -4,7 +4,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("../core/root.zig");
 
-// LMDB is not available on Windows - use conditional compilation
+// LMDB C bindings - conditional compilation for Windows and cross-compilation
+// On Windows or when cross-compiling without headers, use stub implementation
 const c = if (builtin.target.os.tag == .windows) struct {
     pub const MDB_env = struct {};
     pub const MDB_txn = struct {};

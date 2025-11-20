@@ -72,6 +72,12 @@ pub fn build(b: *std.Build) void {
     });
     sequencer_module.addImport("secp256k1", secp256k1_mod);
 
+    // Add LMDB include paths for cross-compilation
+    if (target.result.os.tag == .linux) {
+        sequencer_module.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        sequencer_module.addIncludePath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/include" });
+    }
+
     // LMDB is linked as a system library (liblmdb)
 
     // Library
@@ -80,6 +86,11 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = sequencer_module,
     });
+    // Add LMDB include paths for C imports (needed for @cImport)
+    if (target.result.os.tag == .linux) {
+        lib.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        lib.addIncludePath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/include" });
+    }
     // Link secp256k1 library
     lib.linkLibrary(libsecp256k1);
     // Link LMDB system library (with cross-compilation support)
@@ -101,6 +112,11 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("native-sequencer", sequencer_module);
     exe.root_module.addImport("secp256k1", secp256k1_mod);
+    // Add LMDB include paths for C imports (needed for @cImport)
+    if (target.result.os.tag == .linux) {
+        exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        exe.addIncludePath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/include" });
+    }
     // Link secp256k1 library
     exe.linkLibrary(libsecp256k1);
     // Link LMDB system library (with cross-compilation support)
@@ -131,6 +147,11 @@ pub fn build(b: *std.Build) void {
     });
     unit_tests.root_module.addImport("native-sequencer", sequencer_module);
     unit_tests.root_module.addImport("secp256k1", secp256k1_mod);
+    // Add LMDB include paths for C imports (needed for @cImport)
+    if (target.result.os.tag == .linux) {
+        unit_tests.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        unit_tests.addIncludePath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/include" });
+    }
     // Link secp256k1 library
     unit_tests.linkLibrary(libsecp256k1);
     // Link LMDB system library (with cross-compilation support)
