@@ -22,8 +22,9 @@ pub fn build(b: *std.Build) void {
                 comp.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
                 comp.addLibraryPath(.{ .cwd_relative = "/usr/x86_64-linux-gnu/lib" });
             }
-            // For macOS, let Zig's linkSystemLibrary find the library automatically
-            // (Homebrew libraries are in standard locations)
+            // For macOS, try to link LMDB - if cross-compiling to different arch, it will fail gracefully
+            // (Homebrew installs architecture-specific libraries, so cross-compilation may not work)
+            // We let the linker fail if the library architecture doesn't match
             comp.linkSystemLibrary("lmdb");
         }
     }.add;

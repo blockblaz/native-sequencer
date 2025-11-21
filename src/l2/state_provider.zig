@@ -153,7 +153,7 @@ pub const StateProvider = struct {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
         try params.append(std.json.Value{ .string = block_hex });
-        try params.append(std.json.Value{ .boolean = include_txs });
+        try params.append(std.json.Value{ .bool = include_txs });
 
         const result = try self.callRpc("eth_getBlockByNumber", std.json.Value{ .array = params });
         defer self.allocator.free(result);
@@ -208,7 +208,9 @@ pub const StateProvider = struct {
         const port = url_parts.port;
 
         // Connect to L2 RPC
-        const address = try std.net.Address.parseIp(host, port);
+        // Resolve hostname to IP address (handle "localhost" -> "127.0.0.1")
+        const ip_address = if (std.mem.eql(u8, host, "localhost")) "127.0.0.1" else host;
+        const address = try std.net.Address.parseIp(ip_address, port);
         const stream = try std.net.tcpConnectToAddress(address);
         defer stream.close();
 
@@ -317,7 +319,7 @@ pub const StateProvider = struct {
             .string => |s| {
                 return try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{s});
             },
-            .boolean => |b| {
+            .bool => |b| {
                 return try std.fmt.allocPrint(self.allocator, "{}", .{b});
             },
             else => return error.UnsupportedJsonType,

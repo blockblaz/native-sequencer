@@ -2,6 +2,7 @@ const std = @import("std");
 const core = @import("../core/root.zig");
 const mempool = @import("../mempool/root.zig");
 const state = @import("../state/root.zig");
+const l2_state = @import("../l2/state_provider.zig");
 const validator = @import("transaction.zig");
 
 pub const Ingress = struct {
@@ -9,11 +10,12 @@ pub const Ingress = struct {
     mempool: *mempool.Mempool,
     validator: validator.TransactionValidator,
 
-    pub fn init(allocator: std.mem.Allocator, mp: *mempool.Mempool, sm: *state.StateManager) Ingress {
+    /// Initialize with state manager (for witness generation) and optional state provider (for validation)
+    pub fn init(allocator: std.mem.Allocator, mp: *mempool.Mempool, sm: ?*state.StateManager, sp: ?*l2_state.StateProvider) Ingress {
         return .{
             .allocator = allocator,
             .mempool = mp,
-            .validator = validator.TransactionValidator.init(allocator, sm),
+            .validator = validator.TransactionValidator.init(allocator, sm, sp),
         };
     }
 

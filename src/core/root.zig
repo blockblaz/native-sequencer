@@ -12,4 +12,4 @@ pub const rlp = @import("rlp.zig");
 pub const witness = @import("witness.zig");
 pub const witness_builder = @import("witness_builder.zig");
 pub const trie = @import("trie.zig");
-pub const storage_trie = @import("storage_trie.zig");
+pub const conditional_tx = @import("conditional_tx.zig");

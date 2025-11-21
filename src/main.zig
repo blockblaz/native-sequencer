@@ -80,13 +80,34 @@ pub fn main() !void {
     defer batch_builder.deinit();
     std.log.info("Batch builder initialized (size_limit={d}, gas_limit={d})", .{ cfg.batch_size_limit, cfg.block_gas_limit });
 
-    var ingress_handler = lib.validation.ingress.Ingress.init(allocator, &mp, &state_manager);
+    // Initialize L2 state provider for validation queries (op-node style)
+    var state_provider = lib.l2.StateProvider.init(allocator, cfg.l2_rpc_url);
+    std.log.info("L2 state provider initialized (rpc_url={s})", .{cfg.l2_rpc_url});
 
-    var seq = lib.sequencer.Sequencer.init(allocator, &cfg, &mp, &state_manager, &batch_builder);
+    // Initialize ingress with state manager (for witness generation) and state provider (for validation)
+    var ingress_handler = lib.validation.ingress.Ingress.init(allocator, &mp, &state_manager, &state_provider);
 
+    // Initialize L1 client for derivation
     var l1_client = lib.l1.Client.init(allocator, &cfg);
     defer l1_client.deinit();
     std.log.info("L1 client initialized (rpc_url={s}, chain_id={d})", .{ cfg.l1_rpc_url, cfg.l1_chain_id });
+
+    // Initialize L1 derivation pipeline
+    var l1_derivation = lib.l1.derivation.L1Derivation.init(allocator, &l1_client);
+    std.log.info("L1 derivation pipeline initialized", .{});
+
+    // Initialize L2 Engine API client
+    var engine_client = lib.l2.EngineApiClient.init(allocator, cfg.l2_rpc_url, cfg.l2_engine_api_port, cfg.l2_jwt_secret);
+    if (cfg.l2_jwt_secret) |_| {
+        std.log.info("L2 Engine API client initialized (rpc_url={s}, engine_port={d}, jwt_auth=enabled)", .{ cfg.l2_rpc_url, cfg.l2_engine_api_port });
+    } else {
+        std.log.warn("L2 Engine API client initialized without JWT authentication - Engine API calls may fail", .{});
+        std.log.info("L2 Engine API client initialized (rpc_url={s}, engine_port={d}, jwt_auth=disabled)", .{ cfg.l2_rpc_url, cfg.l2_engine_api_port });
+    }
+
+    // Initialize sequencer with op-node style components
+    var seq = lib.sequencer.Sequencer.init(allocator, &cfg, &mp, &state_manager, &batch_builder, &l1_derivation, &engine_client);
+    defer seq.deinit();
 
     var m = lib.metrics.Metrics.init(allocator);
 
@@ -117,15 +138,23 @@ fn sequencingLoop(seq: *lib.sequencer.Sequencer, batch_builder: *lib.batch.Build
     while (true) {
         std.Thread.sleep(cfg.batch_interval_ms * std.time.ns_per_ms);
 
-        // Build block (even if empty - this increments block number and maintains chain continuity)
-        // Note: Empty blocks change local L2 state (block number, parent hash) but are not submitted to L1
-        // This saves L1 gas costs while maintaining proper L2 chain progression
+        // Update safe blocks from L1 derivation (op-node style)
+        if (l1_client.getLatestBlockNumber()) |block_num| {
+            seq.updateSafeBlock(block_num) catch |err| {
+                std.log.warn("Failed to update safe block from L1: {any}", .{err});
+            };
+        } else |err| {
+            std.log.warn("Failed to get L1 block number: {any}", .{err});
+        }
+
+        // Build unsafe block (sequencer-proposed) via payload request to L2 geth (op-node style)
+        // This requests L2 geth to build a block with transactions from mempool
         const block = seq.buildBlock() catch |err| {
-            std.log.err("Error building block: {any}", .{err});
+            std.log.err("Error building block (payload request failed): {any}", .{err});
             continue;
         };
         m.incrementBlocksCreated();
-        std.log.info("Block #{d} created: {d} transactions, {d} gas used", .{ block.number, block.transactions.len, block.gas_used });
+        std.log.info("Block #{d} created via L2 geth payload: {d} transactions, {d} gas used", .{ block.number, block.transactions.len, block.gas_used });
 
         // Only add blocks with transactions to batch (empty blocks advance L2 state but aren't submitted to L1)
         if (block.transactions.len > 0) {

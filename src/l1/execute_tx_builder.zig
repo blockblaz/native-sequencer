@@ -34,7 +34,7 @@ pub const ExecuteTxBuilder = struct {
         self: *Self,
         batch: *const batch_module.Batch,
         state_manager: *const state.StateManager,
-        sequencer: *const sequencer_module.Sequencer,
+        sequencer: *const sequencer_module.Sequencer, // Unused in op-node architecture (execution delegated to L2 geth)
         nonce: u64,
         gas_tip_cap: u256,
         gas_fee_cap: u256,
@@ -48,15 +48,18 @@ pub const ExecuteTxBuilder = struct {
         defer witness_builder.deinit();
 
         // Process all blocks in batch to build witness
-        // Note: We need a mutable reference to execution_engine for witness tracking
-        // Create a temporary mutable copy of the execution engine
+        // Note: In op-node architecture, execution is delegated to L2 geth,
+        // but we still need local execution for witness generation
+        // Create a temporary execution engine for witness tracking
+        // Note: state_manager is const, but ExecutionEngine needs mutable - cast for witness generation only
         if (batch.blocks.len > 0) {
-            var temp_exec_engine = sequencer.execution_engine;
+            var temp_exec_engine = @import("../sequencer/execution.zig").ExecutionEngine.init(self.allocator, @constCast(state_manager));
             temp_exec_engine.witness_builder = &witness_builder;
             for (batch.blocks) |block| {
                 try witness_builder.generateBlockWitness(&block, &temp_exec_engine);
             }
         }
+        _ = sequencer; // Unused in op-node architecture
 
         // Build witness
         _ = try witness_builder.buildWitness(state_manager, null);
