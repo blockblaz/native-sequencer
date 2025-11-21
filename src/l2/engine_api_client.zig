@@ -132,8 +132,31 @@ pub const EngineApiClient = struct {
         return status;
     }
 
+    /// Execution payload returned from engine_getPayload
+    pub const ExecutionPayload = struct {
+        block_hash: types.Hash,
+        block_number: u64,
+        parent_hash: types.Hash,
+        timestamp: u64,
+        fee_recipient: types.Address,
+        state_root: types.Hash,
+        receipts_root: types.Hash,
+        logs_bloom: [256]u8,
+        prev_randao: types.Hash,
+        gas_limit: u64,
+        gas_used: u64,
+        transactions: [][]const u8, // RLP-encoded transactions
+
+        pub fn deinit(self: *ExecutionPayload, allocator: std.mem.Allocator) void {
+            for (self.transactions) |tx| {
+                allocator.free(tx);
+            }
+            allocator.free(self.transactions);
+        }
+    };
+
     /// Get payload from L2 geth via engine_getPayload
-    pub fn getPayload(self: *Self, payload_id: []const u8) !struct { block_hash: types.Hash, block_number: u64 } {
+    pub fn getPayload(self: *Self, payload_id: []const u8) !ExecutionPayload {
         std.log.info("[EngineAPI] Calling engine_getPayload with payload_id: {s}", .{payload_id});
 
         var params = std.json.Array.init(self.allocator);
@@ -148,12 +171,22 @@ pub const EngineApiClient = struct {
         const result = try self.callRpc("engine_getPayload", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse response
+        // Parse full execution payload response
         const parsed = try std.json.parseFromSliceLeaky(
             struct {
                 result: struct {
                     blockHash: []const u8,
                     blockNumber: []const u8,
+                    parentHash: []const u8,
+                    timestamp: []const u8,
+                    feeRecipient: []const u8,
+                    stateRoot: []const u8,
+                    receiptsRoot: []const u8,
+                    logsBloom: []const u8,
+                    prevRandao: []const u8,
+                    gasLimit: []const u8,
+                    gasUsed: []const u8,
+                    transactions: [][]const u8,
                 },
             },
             self.allocator,
@@ -162,25 +195,72 @@ pub const EngineApiClient = struct {
         );
 
         const block_hash = try self.hexToHash(parsed.result.blockHash);
+        const parent_hash = try self.hexToHash(parsed.result.parentHash);
+        const state_root = try self.hexToHash(parsed.result.stateRoot);
+        const receipts_root = try self.hexToHash(parsed.result.receiptsRoot);
+        const prev_randao = try self.hexToHash(parsed.result.prevRandao);
+        const fee_recipient = try self.hexToAddress(parsed.result.feeRecipient);
+
         const hex_start: usize = if (std.mem.startsWith(u8, parsed.result.blockNumber, "0x")) 2 else 0;
         const block_number = try std.fmt.parseInt(u64, parsed.result.blockNumber[hex_start..], 16);
+
+        const timestamp_start: usize = if (std.mem.startsWith(u8, parsed.result.timestamp, "0x")) 2 else 0;
+        const timestamp = try std.fmt.parseInt(u64, parsed.result.timestamp[timestamp_start..], 16);
+
+        const gas_limit_start: usize = if (std.mem.startsWith(u8, parsed.result.gasLimit, "0x")) 2 else 0;
+        const gas_limit = try std.fmt.parseInt(u64, parsed.result.gasLimit[gas_limit_start..], 16);
+
+        const gas_used_start: usize = if (std.mem.startsWith(u8, parsed.result.gasUsed, "0x")) 2 else 0;
+        const gas_used = try std.fmt.parseInt(u64, parsed.result.gasUsed[gas_used_start..], 16);
+
+        // Parse logs bloom
+        var logs_bloom: [256]u8 = undefined;
+        const bloom_hex_start: usize = if (std.mem.startsWith(u8, parsed.result.logsBloom, "0x")) 2 else 0;
+        const bloom_hex = parsed.result.logsBloom[bloom_hex_start..];
+        if (bloom_hex.len != 512) {
+            return error.InvalidLogsBloomLength;
+        }
+        var i: usize = 0;
+        while (i < 256) : (i += 1) {
+            const high = try std.fmt.parseInt(u8, bloom_hex[i * 2 .. i * 2 + 1], 16);
+            const low = try std.fmt.parseInt(u8, bloom_hex[i * 2 + 1 .. i * 2 + 2], 16);
+            logs_bloom[i] = (high << 4) | low;
+        }
+
+        // Clone transactions
+        const transactions = try self.allocator.alloc([]const u8, parsed.result.transactions.len);
+        for (parsed.result.transactions, 0..) |tx_hex, idx| {
+            transactions[idx] = try self.allocator.dupe(u8, tx_hex);
+        }
 
         const block_hash_hex = try self.hashToHex(block_hash);
         defer self.allocator.free(block_hash_hex);
 
-        std.log.info("[EngineAPI] engine_getPayload response: block_hash={s}, block_number={d}", .{
+        std.log.info("[EngineAPI] engine_getPayload response: block_hash={s}, block_number={d}, {d} txs", .{
             block_hash_hex,
             block_number,
+            transactions.len,
         });
 
-        return .{
+        return ExecutionPayload{
             .block_hash = block_hash,
             .block_number = block_number,
+            .parent_hash = parent_hash,
+            .timestamp = timestamp,
+            .fee_recipient = fee_recipient,
+            .state_root = state_root,
+            .receipts_root = receipts_root,
+            .logs_bloom = logs_bloom,
+            .prev_randao = prev_randao,
+            .gas_limit = gas_limit,
+            .gas_used = gas_used,
+            .transactions = transactions,
         };
     }
 
-    /// Update fork choice state via engine_forkchoiceUpdated
-    pub fn forkchoiceUpdated(self: *Self, head_block_hash: types.Hash, safe_block_hash: types.Hash, finalized_block_hash: types.Hash) !ForkChoiceUpdateResponse {
+    /// Update fork choice state via engine_forkchoiceUpdated (with optional payload attributes)
+    /// If payload_attrs is provided, requests L2 geth to build a payload
+    pub fn forkchoiceUpdated(self: *Self, head_block_hash: types.Hash, safe_block_hash: types.Hash, finalized_block_hash: types.Hash, payload_attrs: ?std.json.ObjectMap) !ForkChoiceUpdateResponse {
         const head_hex = try self.hashToHex(head_block_hash);
         defer self.allocator.free(head_hex);
         const safe_hex = try self.hashToHex(safe_block_hash);
@@ -204,16 +284,18 @@ pub const EngineApiClient = struct {
         try fork_choice_obj.put("safeBlockHash", std.json.Value{ .string = safe_hex });
         try fork_choice_obj.put("finalizedBlockHash", std.json.Value{ .string = finalized_hex });
 
-        // Payload attributes (optional)
-        var payload_attrs_obj = std.json.ObjectMap.init(self.allocator);
-        defer payload_attrs_obj.deinit();
-        const timestamp = @as(u64, @intCast(std.time.timestamp()));
-        try payload_attrs_obj.put("timestamp", std.json.Value{ .string = try std.fmt.allocPrint(self.allocator, "0x{x}", .{timestamp}) });
-        try payload_attrs_obj.put("prevRandao", std.json.Value{ .string = try self.hashToHex(types.hashFromBytes([_]u8{0} ** 32)) });
-        try payload_attrs_obj.put("suggestedFeeRecipient", std.json.Value{ .string = try self.addressToHex(types.addressFromBytes([_]u8{0} ** 20)) });
-
-        try params.append(std.json.Value{ .object = fork_choice_obj });
-        try params.append(std.json.Value{ .object = payload_attrs_obj });
+        // Payload attributes (optional - if provided, L2 geth will build payload)
+        if (payload_attrs) |attrs| {
+            try params.append(std.json.Value{ .object = fork_choice_obj });
+            try params.append(std.json.Value{ .object = attrs });
+        } else {
+            // No payload attributes - just update fork choice
+            try params.append(std.json.Value{ .object = fork_choice_obj });
+            // Add empty payload attributes
+            var empty_attrs = std.json.ObjectMap.init(self.allocator);
+            defer empty_attrs.deinit();
+            try params.append(std.json.Value{ .object = empty_attrs });
+        }
 
         const result = try self.callRpc("engine_forkchoiceUpdated", std.json.Value{ .array = params });
         defer self.allocator.free(result);
@@ -497,5 +579,24 @@ pub const EngineApiClient = struct {
         }
 
         return types.hashFromBytes(result);
+    }
+
+    fn hexToAddress(_: *Self, hex: []const u8) !types.Address {
+        const hex_start: usize = if (std.mem.startsWith(u8, hex, "0x")) 2 else 0;
+        const hex_data = hex[hex_start..];
+
+        if (hex_data.len != 40) {
+            return error.InvalidAddressLength;
+        }
+
+        var result: [20]u8 = undefined;
+        var i: usize = 0;
+        while (i < 20) : (i += 1) {
+            const high = try std.fmt.parseInt(u8, hex_data[i * 2 .. i * 2 + 1], 16);
+            const low = try std.fmt.parseInt(u8, hex_data[i * 2 + 1 .. i * 2 + 2], 16);
+            result[i] = (high << 4) | low;
+        }
+
+        return types.addressFromBytes(result);
     }
 };

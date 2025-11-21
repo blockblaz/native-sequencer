@@ -20,56 +20,125 @@ The Native Sequencer is a high-performance transaction sequencer designed for La
 
 ## Features
 
-- **API Layer**: JSON-RPC/HTTP endpoint for transaction submission
-- **Ingress/Validation**: Fast transaction validation pipeline (signature, nonce, gas, balance checks)
-- **Mempool**: In-memory priority queue with write-ahead-log persistence
-- **Sequencing Engine**: MEV-aware transaction ordering with configurable policies
-- **Batch Formation**: Efficient batch building with gas limit management
-- **L1 Submission**: Submit batches to L1 via JSON-RPC
-- **State Management**: Track nonces, balances, and receipts
-- **Observability**: Metrics endpoint for monitoring
-- **Operator Controls**: Emergency halt, rate limiting, configuration management
-- **ExecuteTx Support**: Stateless transaction type (0x05) with automatic forwarding to L1 geth
+- **op-node Style Architecture**: Delegates execution to L2 geth via Engine API
+- **L1 Derivation**: Derives safe blocks from L1 batches
+- **Witness Generation**: Generates witness data for stateless execution on L1
+- **ExecuteTx Support**: Uses ExecuteTx transactions (type 0x05) for L1 submission
+- **State Queries**: Queries L2 geth for state instead of maintaining local state
+- **MEV-Aware Ordering**: Transaction ordering with MEV support
+- **Metrics & Observability**: Prometheus-style metrics endpoint
 
 ## Architecture
 
-The sequencer follows a modular architecture:
+The native-sequencer follows an op-node style architecture, delegating execution to L2 geth while handling consensus, transaction ordering, and L1 derivation. It uses ExecuteTx transactions for stateless execution on L1.
+
+### High-Level Flow
 
 ```
-┌─────────────┐
-│ API Server │ ← JSON-RPC requests from users/relayers
-└──────┬──────┘
-       │
-┌──────▼──────┐
-│   Ingress   │ ← Validates transactions
-└──────┬──────┘
-       │
-┌──────▼──────┐
-│   Mempool   │ ← Priority queue of pending transactions
-└──────┬──────┘
-       │
-┌──────▼────────┐
-│  Sequencer    │ ← Builds blocks from mempool
-└──────┬────────┘
-       │
-┌──────▼──────────┐
-│  Batch Builder   │ ← Groups blocks into batches
-└──────┬───────────┘
-       │
-┌──────▼──────┐
-│  L1 Client  │ ← Submits batches to L1
-└─────────────┘
+┌──────────────────┐
+│ native-sequencer │ (Consensus Layer)
+└────────┬─────────┘
+         │ 1. Request block building
+         │    engine_forkchoiceUpdated(payload_attrs)
+         ▼
+┌──────────────────┐
+│   L2 geth        │ (Execution Layer)
+│                  │ 2. Build block
+│                  │ 3. Execute transactions
+│                  │ 4. Return payload
+└────────┬─────────┘
+         │ 5. Generate Witness data
+         │    (State trie nodes, contract code, block headers)
+         ▼
+┌──────────────────┐
+│ native-sequencer │
+│                  │ 6. Build witness from execution
+│                  │ 7. Update fork choice
+│                  │ 8. Submit ExecuteTx transaction to L1
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│      L1          │ (Stateless execution via EXECUTE precompile)
+│                  │ (Witness provides state for execution)
+└──────────────────┘
 ```
 
-**Core Components**:
-- **API Server**: Handles JSON-RPC requests from users/relayers
-- **Ingress**: Validates and accepts transactions into mempool
-- **Mempool**: Maintains priority queue of pending transactions
-- **Sequencer**: Builds blocks from mempool transactions
-- **Batch Builder**: Groups blocks into batches for L1 submission
-- **L1 Client**: Submits batches to L1 blockchain
-- **State Manager**: Tracks account state (nonces, balances)
-- **Metrics**: Exposes observability metrics
+### Module Responsibilities
+
+#### Core Modules (`src/core/`)
+- **`transaction.zig`**: Transaction data structures, RLP encoding/decoding, signature recovery
+- **`transaction_execute.zig`**: ExecuteTx transaction type (0x05) implementation for stateless execution
+- **`block.zig`**: Block data structures and serialization
+- **`batch.zig`**: Batch data structures for grouping blocks
+- **`witness.zig`**: Witness data structures (state trie nodes, contract code, block headers)
+- **`witness_builder.zig`**: Witness generation from execution traces
+- **`rlp.zig`**: RLP (Recursive Length Prefix) encoding/decoding for Ethereum data
+- **`types.zig`**: Common type definitions (Hash, Address, etc.)
+- **`signature.zig`**: ECDSA signature verification and recovery
+
+#### API Layer (`src/api/`)
+- **`server.zig`**: JSON-RPC HTTP server for transaction submission and queries
+- **`jsonrpc.zig`**: JSON-RPC protocol implementation
+- **`http.zig`**: HTTP request/response handling
+
+#### Validation (`src/validation/`)
+- **`ingress.zig`**: Transaction ingress handler - accepts and validates transactions
+- **`transaction.zig`**: Transaction validator - validates signatures, nonces, balances using L2 geth state
+
+#### Mempool (`src/mempool/`)
+- **`mempool.zig`**: Priority queue of pending transactions with gas price ordering
+- **`wal.zig`**: Write-ahead log for mempool persistence
+
+#### Sequencer (`src/sequencer/`)
+- **`sequencer.zig`**: Main sequencer logic - requests payloads from L2 geth, manages block state
+- **`block_state.zig`**: Tracks safe/unsafe/finalized/head blocks (op-node style)
+- **`execution.zig`**: Local execution engine for witness generation (not used in main block building path)
+- **`mev.zig`**: MEV-aware transaction ordering
+- **`reorg_handler.zig`**: Chain reorganization detection and handling
+
+#### L1 Integration (`src/l1/`)
+- **`client.zig`**: L1 JSON-RPC client for batch submission and block queries
+- **`derivation.zig`**: L1 derivation pipeline - derives L2 blocks from L1 batches (op-node style)
+- **`batch_parser.zig`**: Parses L2 batch data from L1 transaction calldata
+- **`execute_tx_builder.zig`**: Builds ExecuteTx transactions with witness data for L1 submission
+
+#### L2 Integration (`src/l2/`)
+- **`engine_api_client.zig`**: Engine API client for requesting payloads from L2 geth
+- **`payload_attrs.zig`**: Payload attributes builder for `engine_forkchoiceUpdated`
+- **`state_provider.zig`**: State provider for querying L2 geth state (nonces, balances, code)
+
+#### Batch Management (`src/batch/`)
+- **`builder.zig`**: Groups blocks into batches for L1 submission with size/gas limits
+
+#### State Management (`src/state/`)
+- **`manager.zig`**: State manager for tracking nonces, balances, receipts (used for witness generation)
+- **`state_root.zig`**: State root computation utilities
+
+#### Persistence (`src/persistence/`)
+- **`lmdb.zig`**: LMDB database bindings for persistent state storage
+- **`witness_storage.zig`**: Witness data storage and retrieval
+
+#### Configuration (`src/config/`)
+- **`config.zig`**: Configuration management from environment variables
+
+#### Metrics (`src/metrics/`)
+- **`metrics.zig`**: Metrics collection (transaction counts, blocks created, batches submitted)
+- **`server.zig`**: Metrics HTTP server for Prometheus-style metrics
+
+#### Crypto (`src/crypto/`)
+- **`hash.zig`**: Cryptographic hashing (Keccak256)
+- **`secp256k1_wrapper.zig`**: ECDSA signature operations via libsecp256k1
+- **`signature.zig`**: Signature verification and address recovery
+
+### Architecture Characteristics
+
+1. **op-node Style**: Delegates execution to L2 geth via Engine API (same as op-node)
+2. **L1 Derivation**: Derives safe blocks from L1 batches (op-node style)
+3. **Safe/Unsafe Blocks**: Tracks safe (L1-derived) and unsafe (sequencer-proposed) blocks
+4. **Witness Generation**: Generates witness data for stateless execution on L1
+5. **ExecuteTx Submission**: Uses ExecuteTx transactions (type 0x05) for L1 submission
+6. **State Queries**: Queries L2 geth for state (nonces, balances) instead of maintaining local state
 
 ## Building
 
@@ -132,69 +201,6 @@ docker stop sequencer
 docker rm sequencer
 ```
 
-#### Dockerfile Details
-
-The Dockerfile uses a multi-stage build:
-
-1. **Builder Stage**: Installs Zig 0.14.1 and builds the sequencer
-2. **Runtime Stage**: Creates a minimal runtime image with just the binary
-
-#### Runtime Environment Variables
-
-The container accepts the following environment variables (all have defaults set in the Dockerfile):
-
-**API Configuration**:
-- `API_HOST`: API server host (default: `0.0.0.0`)
-- `API_PORT`: API server port (default: `6197`)
-
-**L1 Configuration**:
-- `L1_RPC_URL`: L1 JSON-RPC endpoint (default: `http://host.docker.internal:8545`)
-- `L1_CHAIN_ID`: L1 chain ID (default: `1`)
-- `SEQUENCER_KEY`: Sequencer private key in hex format
-
-**Sequencer Configuration**:
-- `BATCH_SIZE_LIMIT`: Maximum blocks per batch (default: `1000`)
-- `BLOCK_GAS_LIMIT`: Gas limit per block (default: `30000000`)
-- `BATCH_INTERVAL_MS`: Batch interval in milliseconds (default: `2000`)
-
-**Mempool Configuration**:
-- `MEMPOOL_MAX_SIZE`: Maximum mempool size (default: `100000`)
-- `MEMPOOL_WAL_PATH`: Write-ahead log path (default: `/app/data/mempool.wal`)
-
-**State Configuration**:
-- `STATE_DB_PATH`: State database path (default: `/app/data/state.db`)
-
-**Observability**:
-- `METRICS_PORT`: Metrics server port (default: `9090`)
-- `ENABLE_TRACING`: Enable tracing (default: `false`)
-
-**Operator Controls**:
-- `EMERGENCY_HALT`: Emergency halt flag (default: `false`)
-- `RATE_LIMIT_PER_SECOND`: Rate limit per second (default: `1000`)
-
-#### Ports
-
-The container exposes two ports:
-- **6197**: JSON-RPC API endpoint
-- **9090**: Metrics endpoint
-
-#### Volumes
-
-The container uses a named volume `sequencer-data` to persist:
-- Mempool write-ahead log (`mempool.wal`)
-- State database (`state.db`)
-
-To use a host directory instead:
-```bash
-docker run -v /path/to/data:/app/data ...
-```
-
-#### Security
-
-- The container runs as a non-root user (`sequencer`, UID 1000)
-- Only necessary runtime dependencies are included
-- Source code is not included in the final image
-
 #### Troubleshooting
 
 **Container won't start**:
@@ -224,62 +230,6 @@ Ensure the data directory has correct permissions:
 sudo chown -R 1000:1000 /path/to/data
 ```
 
-#### Building for Different Architectures
-
-**Build for ARM64** (Apple Silicon, Raspberry Pi):
-```bash
-docker buildx build --platform linux/arm64 -t native-sequencer:arm64 .
-```
-
-**Build for AMD64**:
-```bash
-docker buildx build --platform linux/amd64 -t native-sequencer:amd64 .
-```
-
-**Build multi-architecture image**:
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t native-sequencer:latest --push .
-```
-
-#### Deployment Considerations
-
-For deployments, consider:
-
-1. **Use a specific tag** instead of `latest`
-2. **Set resource limits**
-3. **Use secrets** for sensitive data like `SEQUENCER_KEY`
-4. **Enable health checks** (currently placeholder)
-5. **Set up log aggregation**
-6. **Configure monitoring** for metrics endpoint
-
-**Example: Docker with systemd service**:
-```bash
-# Create systemd service file
-cat > /etc/systemd/system/sequencer.service <<EOF
-[Unit]
-Description=Native Sequencer
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-Restart=always
-ExecStart=/usr/bin/docker run --rm --name sequencer \
-  -p 6197:6197 -p 9090:9090 \
-  -v sequencer-data:/app/data \
-  -e L1_RPC_URL=\${L1_RPC_URL} \
-  -e SEQUENCER_KEY=\${SEQUENCER_KEY} \
-  native-sequencer:v0.1.0
-ExecStop=/usr/bin/docker stop sequencer
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable and start service
-systemctl enable sequencer
-systemctl start sequencer
-```
 
 ## Running
 
@@ -295,49 +245,32 @@ zig build run
 
 ### Configuration
 
-Configure the sequencer using environment variables:
+Configure the sequencer using environment variables. Key variables:
 
-```bash
-# API Server Configuration
-export API_HOST=0.0.0.0          # API server host (default: 0.0.0.0)
-export API_PORT=6197            # API server port (default: 6197)
+- **API**: `API_HOST`, `API_PORT` (default: `0.0.0.0:6197`)
+- **L1**: `L1_RPC_URL`, `L1_CHAIN_ID`, `SEQUENCER_KEY`
+- **L2**: `L2_RPC_URL`, `L2_ENGINE_API_PORT` (default: `http://localhost:8545:8551`)
+- **Mempool**: `MEMPOOL_MAX_SIZE`, `MEMPOOL_WAL_PATH`
+- **Batch**: `BATCH_SIZE_LIMIT`, `BATCH_INTERVAL_MS`, `BLOCK_GAS_LIMIT`
+- **State**: `STATE_DB_PATH`
+- **Metrics**: `METRICS_PORT` (default: `9090`)
+- **Controls**: `EMERGENCY_HALT`, `RATE_LIMIT_PER_SECOND`
 
-# L1 Configuration
-export L1_RPC_URL=http://localhost:8545  # L1 JSON-RPC endpoint
-export L1_CHAIN_ID=1                     # L1 chain ID (default: 1)
-export SEQUENCER_KEY=<hex-private-key>   # Sequencer private key (hex)
-
-# Metrics Configuration
-export METRICS_PORT=9090        # Metrics server port (default: 9090)
-
-# Mempool Configuration
-export MEMPOOL_MAX_SIZE=10000   # Maximum mempool size
-export MEMPOOL_WAL_PATH=./wal   # Write-ahead log path
-
-# Batch Configuration
-export BATCH_SIZE_LIMIT=100     # Maximum blocks per batch
-export BATCH_INTERVAL_MS=1000    # Batch interval in milliseconds
-export BLOCK_GAS_LIMIT=30000000  # Gas limit per block
-```
-
-### Example
-
-```bash
-# Set configuration
-export API_PORT=6197
-export L1_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
-export L1_CHAIN_ID=1
-export SEQUENCER_KEY=0x1234567890abcdef...
-
-# Run sequencer
-zig build run
-```
+All variables have defaults. See `src/config/config.zig` for complete list.
 
 ## API Endpoints
 
-### JSON-RPC Methods
+The native-sequencer exposes a JSON-RPC API over HTTP. All endpoints accept POST requests to `/` with JSON-RPC 2.0 formatted requests.
 
-The sequencer exposes standard Ethereum JSON-RPC endpoints:
+### Base URL
+
+```
+http://<API_HOST>:<API_PORT>/
+```
+
+Default: `http://0.0.0.0:6197/`
+
+### JSON-RPC Methods
 
 #### `eth_sendRawTransaction`
 
@@ -348,34 +281,160 @@ Submit a raw transaction to the sequencer. Supports both legacy transactions and
 {
   "jsonrpc": "2.0",
   "method": "eth_sendRawTransaction",
-  "params": ["0x..."],
+  "params": ["0x<raw_transaction_hex>"],
   "id": 1
 }
 ```
 
-**Response**:
+**Parameters**:
+- `params[0]` (string, required): Hex-encoded raw transaction bytes (with or without `0x` prefix)
+
+**Response (Success)**:
 ```json
 {
   "jsonrpc": "2.0",
-  "result": "0x1234...",
+  "result": "0x<transaction_hash>",
+  "id": 1
+}
+```
+
+**Response (Error)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Invalid transaction encoding"
+  },
   "id": 1
 }
 ```
 
 **Transaction Types Supported**:
-- **Legacy Transactions**: Standard Ethereum transactions that are validated, stored in mempool, and sequenced into blocks
-- **ExecuteTx Transactions (Type 0x05)**: Stateless transactions that are forwarded directly to L1 geth for execution. These transactions include:
-  - Pre-state hash and witness data for stateless execution
-  - Withdrawals data
-  - Blob versioned hashes
-  - Standard EIP-1559 fields (chainId, nonce, gas, value, etc.)
 
-**ExecuteTx Handling**:
-- ExecuteTx transactions are stateless and designed to be executed by L1 geth
-- The sequencer performs minimal validation (signature check for deduplication)
-- ExecuteTx transactions are automatically forwarded to L1 geth via `eth_sendRawTransaction`
-- Full validation and execution is handled by L1 geth
-- ExecuteTx transactions are not stored in the sequencer's mempool
+1. **Legacy Transactions** (Standard Ethereum transactions):
+   - Validated for signature, nonce, balance, and gas price
+   - Added to mempool if valid
+   - Sequenced into blocks by the sequencer
+   - Returns transaction hash
+
+2. **ExecuteTx Transactions (Type 0x05)**:
+   - Stateless transactions designed for L1 execution
+   - Minimally validated (signature check for deduplication)
+   - Automatically forwarded to L1 geth via `eth_sendRawTransaction`
+   - Not stored in sequencer's mempool
+   - Returns transaction hash (from L1 if forwarded, or computed locally)
+
+**Error Codes**:
+- `-32602` (InvalidParams): Missing or invalid transaction data
+- `-32000` (ServerError): Transaction validation failed, processing failed, or forwarding failed
+
+**Example (Legacy Transaction)**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_sendRawTransaction",
+    "params": ["0xf86c808502540be400825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc9e3c0a9f6eccdf15726f5f"],
+    "id": 1
+  }'
+```
+
+**Example (ExecuteTx Transaction)**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_sendRawTransaction",
+    "params": ["0x05<execute_tx_rlp_encoded>"],
+    "id": 1
+  }'
+```
+
+---
+
+#### `eth_sendRawTransactionConditional`
+
+Submit a raw transaction with conditional inclusion criteria (EIP-7796). The transaction will only be included in a block if the specified conditions are met.
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_sendRawTransactionConditional",
+  "params": [
+    "0x<raw_transaction_hex>",
+    {
+      "blockNumberMin": "0x42",
+      "blockNumberMax": "0x100",
+      "timestampMin": "0x1234567890",
+      "timestampMax": "0x123456789a"
+    }
+  ],
+  "id": 1
+}
+```
+
+**Parameters**:
+- `params[0]` (string, required): Hex-encoded raw transaction bytes (with or without `0x` prefix)
+- `params[1]` (object, required): Conditional options object with the following optional fields:
+  - `blockNumberMin` (string, optional): Minimum block number (hex string, e.g., `"0x42"`)
+  - `blockNumberMax` (string, optional): Maximum block number (hex string, e.g., `"0x100"`)
+  - `timestampMin` (string or integer, optional): Minimum block timestamp (hex string or integer)
+  - `timestampMax` (string or integer, optional): Maximum block timestamp (hex string or integer)
+
+**Response (Success)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": "0x<transaction_hash>",
+  "id": 1
+}
+```
+
+**Response (Error)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Failed to parse conditional options"
+  },
+  "id": 1
+}
+```
+
+**Conditional Inclusion**:
+- The transaction is added to the mempool but will only be included in a block when all specified conditions are satisfied
+- Conditions are checked against the current block number and timestamp when building blocks
+- If conditions are not met, the transaction remains in the mempool until conditions are satisfied or it expires
+- ExecuteTx transactions (type 0x05) do not support conditional submission
+
+**Error Codes**:
+- `-32602` (InvalidParams): Missing or invalid transaction data or options
+- `-32000` (ServerError): Transaction validation failed, processing failed, or insertion failed
+
+**Example**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_sendRawTransactionConditional",
+    "params": [
+      "0xf86c808502540be400825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc9e3c0a9f6eccdf15726f5f",
+      {
+        "blockNumberMin": "0x100",
+        "blockNumberMax": "0x200"
+      }
+    ],
+    "id": 1
+  }'
+```
+
+---
 
 #### `eth_getTransactionReceipt`
 
@@ -386,10 +445,50 @@ Get transaction receipt by transaction hash.
 {
   "jsonrpc": "2.0",
   "method": "eth_getTransactionReceipt",
-  "params": ["0x..."],
+  "params": ["0x<transaction_hash>"],
   "id": 1
 }
 ```
+
+**Parameters**:
+- `params[0]` (string, required): Transaction hash (hex-encoded, with or without `0x` prefix)
+
+**Response (Success)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": null,
+  "id": 1
+}
+```
+
+**Note**: Currently returns `null` as receipt storage is not yet implemented. Future versions will return full receipt data including block number, gas used, logs, etc.
+
+**Response (Error)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Missing params"
+  },
+  "id": 1
+}
+```
+
+**Example**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_getTransactionReceipt",
+    "params": ["0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"],
+    "id": 1
+  }'
+```
+
+---
 
 #### `eth_blockNumber`
 
@@ -405,28 +504,193 @@ Get the current block number.
 }
 ```
 
-### L1 Client Features
+**Parameters**: None (empty array)
 
-The sequencer includes a full-featured HTTP client for L1 communication:
-
-- **Standard Transaction Submission**: `eth_sendRawTransaction` for submitting batches to L1
-- **Conditional Transaction Submission**: `eth_sendRawTransactionConditional` (EIP-7796) for conditional batch submission with block number constraints
-- **Transaction Receipt Polling**: `eth_getTransactionReceipt` for tracking batch inclusion
-- **Block Number Queries**: `eth_blockNumber` for L1 state synchronization
-- **Automatic Confirmation Waiting**: `waitForInclusion()` method for polling transaction confirmations
-
-#### Conditional Transaction Submission
-
-The sequencer supports EIP-7796 conditional transaction submission, allowing batches to be submitted with preconditions:
-
-```zig
-const options = l1.Client.ConditionalOptions{
-    .block_number_max = 1000000, // Only include if block <= 1000000
-};
-const tx_hash = try l1_client.submitBatchConditional(batch, options);
+**Response (Success)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": "0x0",
+  "id": 1
+}
 ```
 
-This feature enables more efficient batch submission by allowing the sequencer to specify maximum block numbers for inclusion, reducing the need for extensive simulations.
+**Note**: Currently returns `0x0` as block number tracking is not yet fully implemented. Future versions will return the actual current block number.
+
+**Example**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_blockNumber",
+    "params": [],
+    "id": 1
+  }'
+```
+
+---
+
+#### `debug_generateWitness` (Debug Endpoint)
+
+Generate witness data for a single transaction. This is a debug/testing endpoint for witness generation.
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "debug_generateWitness",
+  "params": ["0x<raw_transaction_hex>"],
+  "id": 1
+}
+```
+
+**Parameters**:
+- `params[0]` (string, required): Hex-encoded raw transaction bytes (with or without `0x` prefix)
+
+**Response (Success)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "witness": "0x<rlp_encoded_witness>",
+    "witnessSize": 1234
+  },
+  "id": 1
+}
+```
+
+**Response Fields**:
+- `witness` (string): Hex-encoded RLP-encoded witness data containing state trie nodes, contract code, and block headers
+- `witnessSize` (integer): Size of the witness in bytes
+
+**Response (Error)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "Sequencer not available for witness generation"
+  },
+  "id": 1
+}
+```
+
+**Error Codes**:
+- `-32602` (InvalidParams): Missing or invalid transaction data
+- `-32000` (ServerError): Sequencer not available, transaction execution failed, or witness generation failed
+
+**Note**: This endpoint executes the transaction locally to track state access. In production, witness generation happens during ExecuteTx building.
+
+**Example**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "debug_generateWitness",
+    "params": ["0xf86c808502540be400825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc9e3c0a9f6eccdf15726f5f"],
+    "id": 1
+  }'
+```
+
+---
+
+#### `debug_generateBlockWitness` (Debug Endpoint)
+
+Generate witness data for a block. This is a debug/testing endpoint for block witness generation.
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "debug_generateBlockWitness",
+  "params": ["latest"]
+}
+```
+
+or
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "debug_generateBlockWitness",
+  "params": ["0x42"]
+}
+```
+
+**Parameters**:
+- `params[0]` (string or integer, required): Block number as hex string (`"0x42"`), decimal integer (`42`), or `"latest"` for the latest block
+
+**Response (Success)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "witness": "0x<rlp_encoded_witness>",
+    "witnessSize": 5678,
+    "blockNumber": 42,
+    "transactionCount": 5
+  },
+  "id": 1
+}
+```
+
+**Response Fields**:
+- `witness` (string): Hex-encoded RLP-encoded witness data containing state trie nodes, contract code, and block headers for all transactions in the block
+- `witnessSize` (integer): Size of the witness in bytes
+- `blockNumber` (integer): Block number for which witness was generated
+- `transactionCount` (integer): Number of transactions in the block
+
+**Response (Error)**:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "Failed to build block"
+  },
+  "id": 1
+}
+```
+
+**Error Codes**:
+- `-32602` (InvalidParams): Missing or invalid block number
+- `-32000` (ServerError): Sequencer not available or failed to build block
+
+**Note**: This endpoint builds a new block from the mempool and generates witness for it. In production, witness generation happens during ExecuteTx batch building.
+
+**Example**:
+```bash
+curl -X POST http://localhost:6197/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "debug_generateBlockWitness",
+    "params": ["latest"],
+    "id": 1
+  }'
+```
+
+---
+
+### JSON-RPC Error Codes
+
+The sequencer uses standard JSON-RPC 2.0 error codes:
+
+| Code | Name | Description |
+|------|------|-------------|
+| `-32700` | ParseError | Invalid JSON was received |
+| `-32600` | InvalidRequest | The JSON sent is not a valid Request object |
+| `-32601` | MethodNotFound | The method does not exist |
+| `-32602` | InvalidParams | Invalid method parameters |
+| `-32603` | InternalError | Internal JSON-RPC error |
+| `-32000` | ServerError | Server error (validation failures, processing errors) |
+
+### HTTP Status Codes
+
+- `200 OK`: Request processed successfully (even if JSON-RPC returns an error)
+- `404 Not Found`: Invalid HTTP method or path (must be POST `/`)
 
 ### Metrics
 
@@ -441,26 +705,13 @@ Available metrics:
 
 ## Development Status
 
-This is an experimental implementation. The following features are implemented or in progress:
-
-- ✅ Core sequencer architecture
+This is experimental software. Core features are implemented:
+- ✅ op-node style architecture (L1 derivation, Engine API, safe/unsafe blocks)
 - ✅ Transaction validation and mempool
-- ✅ Batch formation and L1 submission
-- ✅ Basic state management
-- ✅ RLP encoding/decoding (complete implementation with tests)
-- ✅ Docker support
-- ✅ HTTP server implementation (Zig 0.14.1 networking APIs)
-- ✅ HTTP client for L1 communication (JSON-RPC support)
-- ✅ Conditional transaction submission (EIP-7796 support)
-- ✅ ExecuteTx transaction type support (type 0x05)
-- ✅ ExecuteTx JSON serialization/deserialization
-- ✅ ExecuteTx forwarding to L1 geth
-- ⏳ Complete ECDSA signature verification and recovery (basic implementation)
-- ⏳ Full transaction execution engine
-- ✅ LMDB integration for persistence
-- ⏳ WebSocket/gRPC support for real-time subscriptions
-- ⏳ Complete MEV bundle detection
-- ⏳ Proper error handling and retry logic
+- ✅ Batch formation and L1 submission via ExecuteTx
+- ✅ LMDB persistence
+- ✅ Witness generation for stateless execution
+- ⏳ L1 subscription monitoring (WebSocket support)
 - ⏳ Comprehensive testing
 
 ## Linting
@@ -489,63 +740,19 @@ zig build lint-fix
 
 ### CI/CD Integration
 
-A comprehensive GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
-- Push to main/master/develop branches
-- Pull requests targeting main/master/develop branches
-
-The CI pipeline includes:
-
-#### Linting & Testing
-- **Code formatting validation** (`zig fmt --check`)
-- **AST syntax checks** for key modules (`zig ast-check`)
-- **Unit tests** (`zig build test`)
-
-#### Multi-Platform Builds
-- **Linux (x86_64)**: Builds and verifies binary for Linux
-- **macOS (x86_64)**: Builds and verifies binary for Intel Macs
-- **macOS (ARM64)**: Builds and verifies binary for Apple Silicon
-- **Windows (x86_64)**: Builds and verifies binary for Windows
-
-#### Docker Build Validation
-- **Multi-architecture Docker builds**: Tests Docker image builds for `linux/amd64` (ARM64 builds are currently disabled in CI)
-- **Image verification**: Validates Docker image structure and metadata
-- **Runtime testing**: Verifies that the Docker image can start and contains the expected binary
-
-The workflow will fail if:
-- Code is not properly formatted
-- AST checks reveal syntax or type errors
-- Unit tests fail
-- Build fails on any platform
-- Docker image build or validation fails
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs linting, testing, and multi-platform builds (Linux, macOS, Windows) on push/PR.
 
 ## Technical Details
 
-### Networking Implementation
-
-The sequencer uses Zig 0.14.1's standard library networking APIs:
-
-- **HTTP Server**: Built on `std.net.Server` and `std.net.Stream` for accepting JSON-RPC connections
-- **HTTP Client**: Uses `std.net.tcpConnectToAddress` for L1 RPC communication
-- **Connection Handling**: Thread-based concurrent request handling with proper resource cleanup
-- **RLP Transaction Parsing**: Full RLP decoding support for transaction deserialization
-
 ### ExecuteTx Transaction Support
 
-The sequencer supports ExecuteTx transactions (type 0x05), a stateless transaction type designed for execution by L1 geth nodes. Key features:
+The sequencer supports ExecuteTx transactions (type 0x05) for stateless execution on L1. ExecuteTx transactions are:
+- **Stateless**: Designed for execution by L1 geth nodes
+- **Forwarded to L1**: Automatically forwarded to L1 geth via `eth_sendRawTransaction`
+- **Minimally Validated**: Only signature check for deduplication (full validation by L1 geth)
+- **Not Mempooled**: Not stored in sequencer's mempool
 
-- **Transaction Type**: EIP-2718 typed transaction with type prefix `0x05`
-- **RLP Encoding/Decoding**: Full RLP serialization support matching go-ethereum's ExecuteTx format
-- **JSON Serialization**: Complete JSON-RPC serialization/deserialization for ExecuteTx fields
-- **Signature Recovery**: ECDSA signature verification and sender address recovery
-- **L1 Forwarding**: Automatic forwarding to L1 geth via `eth_sendRawTransaction`
-- **Minimal Validation**: Only signature check for deduplication (full validation done by L1 geth)
-
-ExecuteTx transactions include:
-- Standard EIP-1559 fields (chainId, nonce, gas, gasTipCap, gasFeeCap, value, to, data)
-- ExecuteTx-specific fields (preStateHash, witness, withdrawals, coinbase, blockNumber, timestamp, blobHashes)
-- Signature components (v, r, s)
-
-See `src/core/transaction_execute.zig` for the complete implementation.
+ExecuteTx includes pre-state hash, witness data, withdrawals, and standard EIP-1559 fields. See `src/core/transaction_execute.zig` for implementation details.
 
 ## Known Issues & Workarounds
 

@@ -322,6 +322,94 @@ pub const Client = struct {
         return try std.fmt.parseInt(u64, hex_str[hex_start..], 16);
     }
 
+    pub const L1BlockTx = struct {
+        to: ?[]const u8,
+        data: []const u8,
+    };
+
+    pub const L1Block = struct {
+        number: u64,
+        hash: core.types.Hash,
+        parent_hash: core.types.Hash,
+        timestamp: u64,
+        transactions: []L1BlockTx,
+    };
+
+    /// Get L1 block by number (for batch parsing)
+    pub fn getBlockByNumber(self: *Client, block_number: u64, include_txs: bool) !L1Block {
+        const block_hex = try std.fmt.allocPrint(self.allocator, "0x{x}", .{block_number});
+        defer self.allocator.free(block_hex);
+
+        var params = std.json.Array.init(self.allocator);
+        defer params.deinit();
+        try params.append(std.json.Value{ .string = block_hex });
+        try params.append(std.json.Value{ .bool = include_txs });
+
+        const result = try self.callRpc("eth_getBlockByNumber", std.json.Value{ .array = params });
+        defer self.allocator.free(result);
+
+        // Parse result
+        const parsed = try std.json.parseFromSliceLeaky(
+            struct {
+                result: struct {
+                    number: []const u8,
+                    hash: []const u8,
+                    parentHash: []const u8,
+                    timestamp: []const u8,
+                    transactions: []struct { to: ?[]const u8, input: []const u8 },
+                },
+            },
+            self.allocator,
+            result,
+            .{},
+        );
+
+        const hex_start: usize = if (std.mem.startsWith(u8, parsed.result.number, "0x")) 2 else 0;
+        const number = try std.fmt.parseInt(u64, parsed.result.number[hex_start..], 16);
+
+        const hash = try self.hexToHash(parsed.result.hash);
+        const parent_hash = try self.hexToHash(parsed.result.parentHash);
+        const timestamp_hex_start: usize = if (std.mem.startsWith(u8, parsed.result.timestamp, "0x")) 2 else 0;
+        const timestamp = try std.fmt.parseInt(u64, parsed.result.timestamp[timestamp_hex_start..], 16);
+
+        // Clone transactions
+        const txs = try self.allocator.alloc(L1BlockTx, parsed.result.transactions.len);
+        for (parsed.result.transactions, 0..) |tx, i| {
+            txs[i] = L1BlockTx{
+                .to = if (tx.to) |to| try self.allocator.dupe(u8, to) else null,
+                .data = try self.allocator.dupe(u8, tx.input),
+            };
+        }
+
+        return L1Block{
+            .number = number,
+            .hash = hash,
+            .parent_hash = parent_hash,
+            .timestamp = timestamp,
+            .transactions = txs,
+        };
+    }
+
+    fn hexToHash(self: *Client, hex: []const u8) !core.types.Hash {
+        _ = self;
+        const hex_start: usize = if (std.mem.startsWith(u8, hex, "0x")) 2 else 0;
+        const hex_data = hex[hex_start..];
+
+        if (hex_data.len != 64) {
+            return error.InvalidHashLength;
+        }
+
+        var result: [32]u8 = undefined;
+        var i: usize = 0;
+        while (i < 32) : (i += 1) {
+            const high = try std.fmt.parseInt(u8, hex_data[i * 2 .. i * 2 + 1], 16);
+            const low = try std.fmt.parseInt(u8, hex_data[i * 2 + 1 .. i * 2 + 2], 16);
+            result[i] = (high << 4) | low;
+        }
+
+        return core.types.hashFromBytes(result);
+    }
+
     fn getTransactionReceipt(self: *Client, tx_hash: core.types.Hash) !?struct { block_number: u64 } {
         const hash_bytes = core.types.hashToBytes(tx_hash);
         const hash_hex = try self.bytesToHex(&hash_bytes);

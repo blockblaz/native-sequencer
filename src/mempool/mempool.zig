@@ -2,6 +2,7 @@ const std = @import("std");
 const core = @import("../core/root.zig");
 const config = @import("../config/root.zig");
 const wal = @import("wal.zig");
+const conditional_tx = @import("../core/conditional_tx.zig");
 
 // Metadata for priority queue comparison
 const EntryMetadata = struct {
@@ -148,6 +149,8 @@ pub const Mempool = struct {
     // Use HashMap<Address, usize> where usize is the first transaction index for that sender
     // Then scan storage for all transactions from that sender
     by_sender: std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage),
+    // Conditional transactions: hash -> conditional options
+    conditional_txs: std.HashMap(core.types.Hash, conditional_tx.ConditionalOptions, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage),
     wal: ?wal.WriteAheadLog = null,
     size: usize = 0,
 
@@ -165,6 +168,7 @@ pub const Mempool = struct {
             .metadata = std.HashMap(core.types.Hash, EntryMetadata, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
             .entries = std.PriorityQueue(QueueEntry, void, compareQueueEntry).init(allocator, {}),
             .by_sender = std.HashMap(core.types.Address, usize, std.hash_map.AutoContext(core.types.Address), std.hash_map.default_max_load_percentage).init(allocator),
+            .conditional_txs = std.HashMap(core.types.Hash, conditional_tx.ConditionalOptions, std.hash_map.AutoContext(core.types.Hash), std.hash_map.default_max_load_percentage).init(allocator),
         };
 
         // Initialize WAL if configured
@@ -181,6 +185,13 @@ pub const Mempool = struct {
         // Clean up custom storage
         self.storage.deinit();
 
+        // Clean up conditional transactions
+        var cond_iter = self.conditional_txs.iterator();
+        while (cond_iter.next()) |entry| {
+            entry.value_ptr.*.deinit();
+        }
+        self.conditional_txs.deinit();
+
         self.by_sender.deinit();
 
         // Clear priority queue
@@ -195,7 +206,13 @@ pub const Mempool = struct {
         }
     }
 
+    /// Insert a regular transaction
     pub fn insert(self: *Mempool, tx: core.transaction.Transaction) !bool {
+        return self.insertWithConditions(tx, null);
+    }
+
+    /// Insert a transaction with conditional options
+    pub fn insertWithConditions(self: *Mempool, tx: core.transaction.Transaction, conditions_opt: ?conditional_tx.ConditionalOptions) !bool {
         // Check size limit
         if (self.size >= self.config.mempool_max_size) {
             return error.MempoolFull;
@@ -224,6 +241,11 @@ pub const Mempool = struct {
             .priority = priority,
             .received_at = @intCast(now),
         });
+
+        // Store conditional options if provided
+        if (conditions_opt) |*cond| {
+            try self.conditional_txs.put(tx_hash, cond.*);
+        }
 
         // Write to WAL
         if (self.wal) |*wal_instance| {
@@ -291,7 +313,9 @@ pub const Mempool = struct {
         return tx;
     }
 
-    pub fn getTopN(self: *Mempool, gas_limit: u64, max_count: usize) ![]core.transaction.Transaction {
+    /// Get top N transactions, checking conditional transaction conditions
+    /// current_block_number and current_timestamp are used to filter conditional transactions
+    pub fn getTopN(self: *Mempool, gas_limit: u64, max_count: usize, current_block_number: u64, current_timestamp: u64) ![]core.transaction.Transaction {
         var result = std.ArrayList(core.transaction.Transaction).init(self.allocator);
         errdefer result.deinit();
 
@@ -314,6 +338,15 @@ pub const Mempool = struct {
                 continue;
             };
 
+            // Check conditional transaction conditions
+            if (self.conditional_txs.get(entry.hash)) |conditions| {
+                if (!conditions.checkConditions(current_block_number, current_timestamp)) {
+                    // Conditions not met, put back in queue
+                    try temp_queue.add(entry);
+                    continue;
+                }
+            }
+
             if (tx.gas_limit <= remaining_gas and count < max_count) {
                 try result.append(tx);
                 remaining_gas -= tx.gas_limit;
@@ -321,6 +354,7 @@ pub const Mempool = struct {
                 // Remove from maps since we're using it
                 _ = self.by_hash.remove(entry.hash);
                 _ = self.metadata.remove(entry.hash);
+                _ = self.conditional_txs.remove(entry.hash);
             } else {
                 // Put back in queue
                 try temp_queue.add(entry);

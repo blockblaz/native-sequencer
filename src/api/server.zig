@@ -111,6 +111,8 @@ pub const JsonRpcServer = struct {
         // Handle method
         if (std.mem.eql(u8, request.method, "eth_sendRawTransaction")) {
             return try self.handleSendRawTransaction(&request);
+        } else if (std.mem.eql(u8, request.method, "eth_sendRawTransactionConditional")) {
+            return try self.handleSendRawTransactionConditional(&request);
         } else if (std.mem.eql(u8, request.method, "eth_getTransactionReceipt")) {
             return try self.handleGetTransactionReceipt(&request);
         } else if (std.mem.eql(u8, request.method, "eth_blockNumber")) {
@@ -267,6 +269,136 @@ pub const JsonRpcServer = struct {
         }
     }
 
+    fn handleSendRawTransactionConditional(self: *JsonRpcServer, request: *const jsonrpc.JsonRpcRequest) ![]u8 {
+        self.metrics.incrementTransactionsReceived();
+
+        // Parse params
+        const params = request.params orelse {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing params");
+        };
+
+        const params_array = switch (params) {
+            .array => |arr| arr,
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid params - expected array");
+            },
+        };
+
+        if (params_array.items.len < 2) {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Missing transaction data or options");
+        }
+
+        // Parse transaction hex
+        const first_param = params_array.items[0];
+        const tx_hex = switch (first_param) {
+            .string => |s| s,
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction format");
+            },
+        };
+
+        // Parse conditional options
+        const second_param = params_array.items[1];
+        const options_json = switch (second_param) {
+            .object => |obj| std.json.Value{ .object = obj },
+            else => {
+                return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid options format - expected object");
+            },
+        };
+
+        // Parse conditional options
+        const conditional_options = core.conditional_tx.ConditionalOptions.fromJson(self.allocator, options_json) catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Failed to parse conditional options");
+        };
+
+        // Decode hex string (remove 0x prefix if present)
+        const hex_start: usize = if (std.mem.startsWith(u8, tx_hex, "0x")) 2 else 0;
+        const hex_data = tx_hex[hex_start..];
+
+        var tx_bytes = std.ArrayList(u8).init(self.allocator);
+        defer tx_bytes.deinit();
+
+        var i: usize = 0;
+        while (i < hex_data.len) : (i += 2) {
+            if (i + 1 >= hex_data.len) break;
+            const byte = try std.fmt.parseInt(u8, hex_data[i .. i + 2], 16);
+            try tx_bytes.append(byte);
+        }
+
+        const tx_bytes_slice = try tx_bytes.toOwnedSlice();
+        defer self.allocator.free(tx_bytes_slice);
+
+        // Check transaction type (EIP-2718)
+        if (tx_bytes_slice.len > 0 and tx_bytes_slice[0] == core.transaction.ExecuteTxType) {
+            // ExecuteTx transactions don't support conditional submission
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "ExecuteTx transactions do not support conditional submission");
+        }
+
+        // Parse legacy transaction
+        const tx = core.transaction.Transaction.fromRaw(self.allocator, tx_bytes_slice) catch {
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.InvalidParams, "Invalid transaction encoding");
+        };
+        defer self.allocator.free(tx.data);
+
+        // Validate transaction first
+        const result = self.ingress_handler.acceptTransaction(tx) catch {
+            self.metrics.incrementTransactionsRejected();
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction processing failed");
+        };
+
+        if (result != .valid) {
+            self.metrics.incrementTransactionsRejected();
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction validation failed");
+        }
+
+        // Clone transaction data since acceptTransaction may have consumed it
+        const tx_data_clone = try self.allocator.dupe(u8, tx.data);
+        const tx_clone = core.transaction.Transaction{
+            .nonce = tx.nonce,
+            .gas_price = tx.gas_price,
+            .gas_limit = tx.gas_limit,
+            .to = tx.to,
+            .value = tx.value,
+            .data = tx_data_clone,
+            .v = tx.v,
+            .r = tx.r,
+            .s = tx.s,
+        };
+
+        // Insert transaction with conditional options into mempool
+        const inserted = self.ingress_handler.mempool.insertWithConditions(tx_clone, conditional_options) catch {
+            self.allocator.free(tx_data_clone);
+            self.metrics.incrementTransactionsRejected();
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Failed to insert conditional transaction");
+        };
+
+        if (!inserted) {
+            self.allocator.free(tx_data_clone);
+            self.metrics.incrementTransactionsRejected();
+            return try jsonrpc.JsonRpcResponse.errorResponse(self.allocator, request.id, jsonrpc.ErrorCode.ServerError, "Transaction already in mempool");
+        }
+
+        self.metrics.incrementTransactionsAccepted();
+
+        // Return transaction hash
+        const tx_hash = try tx.hash(self.allocator);
+        const hash_bytes = core.types.hashToBytes(tx_hash);
+        var hex_buf: [66]u8 = undefined; // 0x + 64 hex chars
+        hex_buf[0] = '0';
+        hex_buf[1] = 'x';
+        var j: usize = 0;
+        while (j < 32) : (j += 1) {
+            const hex_digits = "0123456789abcdef";
+            hex_buf[2 + j * 2] = hex_digits[hash_bytes[j] >> 4];
+            hex_buf[2 + j * 2 + 1] = hex_digits[hash_bytes[j] & 0xf];
+        }
+        const hash_hex = try std.fmt.allocPrint(self.allocator, "{s}", .{&hex_buf});
+        defer self.allocator.free(hash_hex);
+
+        const result_value = std.json.Value{ .string = hash_hex };
+        return try jsonrpc.JsonRpcResponse.success(self.allocator, request.id, result_value);
+    }
+
     fn handleGetTransactionReceipt(self: *JsonRpcServer, request: *const jsonrpc.JsonRpcRequest) ![]u8 {
         // In production, fetch receipt from state manager
         const result_value = std.json.Value{ .null = {} };
@@ -343,8 +475,10 @@ pub const JsonRpcServer = struct {
         var witness_builder = core.witness_builder.WitnessBuilder.init(self.allocator);
         defer witness_builder.deinit();
 
-        // Create execution engine with witness builder
-        var exec_engine = sequencer.execution_engine;
+        // Create execution engine with witness builder for witness generation
+        // Note: In op-node architecture, execution is delegated to L2 geth,
+        // but we still need local execution for witness generation (debug endpoint)
+        var exec_engine = @import("../sequencer/execution.zig").ExecutionEngine.init(self.allocator, sequencer.state_manager);
         exec_engine.witness_builder = &witness_builder;
 
         // Execute transaction (this will track state access)
@@ -445,8 +579,14 @@ pub const JsonRpcServer = struct {
         var witness_builder = core.witness_builder.WitnessBuilder.init(self.allocator);
         defer witness_builder.deinit();
 
+        // Create execution engine for witness generation
+        // Note: In op-node architecture, execution is delegated to L2 geth,
+        // but we still need local execution for witness generation (debug endpoint)
+        var exec_engine = @import("../sequencer/execution.zig").ExecutionEngine.init(self.allocator, sequencer.state_manager);
+        exec_engine.witness_builder = &witness_builder;
+
         // Generate witness for the block
-        try witness_builder.generateBlockWitness(&block, &sequencer.execution_engine);
+        try witness_builder.generateBlockWitness(&block, &exec_engine);
 
         // Build witness
         _ = try witness_builder.buildWitness(sequencer.state_manager, null);

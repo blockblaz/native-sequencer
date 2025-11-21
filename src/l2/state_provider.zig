@@ -153,7 +153,7 @@ pub const StateProvider = struct {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
         try params.append(std.json.Value{ .string = block_hex });
-        try params.append(std.json.Value{ .boolean = include_txs });
+        try params.append(std.json.Value{ .bool = include_txs });
 
         const result = try self.callRpc("eth_getBlockByNumber", std.json.Value{ .array = params });
         defer self.allocator.free(result);
@@ -317,7 +317,7 @@ pub const StateProvider = struct {
             .string => |s| {
                 return try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{s});
             },
-            .boolean => |b| {
+            .bool => |b| {
                 return try std.fmt.allocPrint(self.allocator, "{}", .{b});
             },
             else => return error.UnsupportedJsonType,
