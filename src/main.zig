@@ -97,8 +97,13 @@ pub fn main() !void {
     std.log.info("L1 derivation pipeline initialized", .{});
 
     // Initialize L2 Engine API client
-    var engine_client = lib.l2.EngineApiClient.init(allocator, cfg.l2_rpc_url, cfg.l2_engine_api_port);
-    std.log.info("L2 Engine API client initialized (rpc_url={s}, engine_port={d})", .{ cfg.l2_rpc_url, cfg.l2_engine_api_port });
+    var engine_client = lib.l2.EngineApiClient.init(allocator, cfg.l2_rpc_url, cfg.l2_engine_api_port, cfg.l2_jwt_secret);
+    if (cfg.l2_jwt_secret) |_| {
+        std.log.info("L2 Engine API client initialized (rpc_url={s}, engine_port={d}, jwt_auth=enabled)", .{ cfg.l2_rpc_url, cfg.l2_engine_api_port });
+    } else {
+        std.log.warn("L2 Engine API client initialized without JWT authentication - Engine API calls may fail", .{});
+        std.log.info("L2 Engine API client initialized (rpc_url={s}, engine_port={d}, jwt_auth=disabled)", .{ cfg.l2_rpc_url, cfg.l2_engine_api_port });
+    }
 
     // Initialize sequencer with op-node style components
     var seq = lib.sequencer.Sequencer.init(allocator, &cfg, &mp, &state_manager, &batch_builder, &l1_derivation, &engine_client);

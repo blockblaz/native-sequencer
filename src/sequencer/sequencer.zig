@@ -78,15 +78,17 @@ pub const Sequencer = struct {
         defer payload_attrs.deinit(self.allocator);
 
         // Convert to JSON-RPC format
-        var payload_attrs_json = try self.payload_builder.toJsonRpc(payload_attrs);
-        defer payload_attrs_json.deinit();
+        const payload_attrs_json = try self.payload_builder.toJsonRpc(payload_attrs);
+        // Note: payload_attrs_json ownership is transferred to forkchoiceUpdated
+        // It will be deinitialized in forkchoiceUpdated's defer block
 
         // Get fork choice state
         const head_hash = self.block_state.getHeadBlockHash() orelse self.parent_hash;
         const safe_hash = self.block_state.getSafeBlockHash() orelse self.parent_hash;
         const finalized_hash = self.block_state.getFinalizedBlockHash() orelse self.parent_hash;
 
-        // Request payload via engine_forkchoiceUpdated
+        // Request payload via engine_forkchoiceUpdatedV3
+        // payload_attrs_json is moved into params array and will be deinitialized there
         const response = try self.engine_client.forkchoiceUpdated(head_hash, safe_hash, finalized_hash, payload_attrs_json);
 
         if (response.payload_id) |payload_id| {
@@ -169,7 +171,13 @@ pub const Sequencer = struct {
     /// Requests payload from L2 geth instead of building directly
     pub fn buildBlock(self: *Self) !core.block.Block {
         // Request payload from L2 geth
-        const payload_id_opt = try self.requestPayload();
+        const payload_id_opt = self.requestPayload() catch |err| {
+            // Log connection errors with more context
+            if (err == error.ConnectionRefused) {
+                std.log.warn("[Sequencer] L2 geth Engine API not available at {s}:{d}. Is L2 geth running?", .{ self.config.l2_rpc_url, self.config.l2_engine_api_port });
+            }
+            return err;
+        };
         if (payload_id_opt) |payload_id| {
             // Get built payload
             var payload = try self.getPayload(payload_id);

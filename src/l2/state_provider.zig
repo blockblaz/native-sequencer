@@ -208,7 +208,9 @@ pub const StateProvider = struct {
         const port = url_parts.port;
 
         // Connect to L2 RPC
-        const address = try std.net.Address.parseIp(host, port);
+        // Resolve hostname to IP address (handle "localhost" -> "127.0.0.1")
+        const ip_address = if (std.mem.eql(u8, host, "localhost")) "127.0.0.1" else host;
+        const address = try std.net.Address.parseIp(ip_address, port);
         const stream = try std.net.tcpConnectToAddress(address);
         defer stream.close();
 

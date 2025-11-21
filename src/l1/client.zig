@@ -305,21 +305,35 @@ pub const Client = struct {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
 
-        const result = try self.callRpc("eth_blockNumber", std.json.Value{ .array = params });
+        const result = self.callRpc("eth_blockNumber", std.json.Value{ .array = params }) catch |err| {
+            // Connection errors should be handled by caller
+            return err;
+        };
         defer self.allocator.free(result);
 
+        // Check if response is empty
+        if (result.len == 0) {
+            return error.EmptyResponse;
+        }
+
         // Parse result - should be hex string
-        const parsed = try std.json.parseFromSliceLeaky(
+        const parsed = std.json.parseFromSliceLeaky(
             struct { result: []const u8 },
             self.allocator,
             result,
             .{},
-        );
+        ) catch |err| {
+            std.log.err("[L1Client] Failed to parse eth_blockNumber response: {any}, response: {s}", .{ err, result });
+            return error.UnexpectedToken;
+        };
 
         // Convert hex string to u64
         const hex_str = parsed.result;
         const hex_start: usize = if (std.mem.startsWith(u8, hex_str, "0x")) 2 else 0;
-        return try std.fmt.parseInt(u64, hex_str[hex_start..], 16);
+        return std.fmt.parseInt(u64, hex_str[hex_start..], 16) catch |err| {
+            std.log.err("[L1Client] Failed to parse block number hex '{s}': {any}", .{ hex_str, err });
+            return err;
+        };
     }
 
     pub const L1BlockTx = struct {
@@ -450,8 +464,13 @@ pub const Client = struct {
         const port = url_parts.port;
 
         // Connect to L1 RPC
-        const address = try std.net.Address.parseIp(host, port);
-        const stream = try std.net.tcpConnectToAddress(address);
+        // Resolve hostname to IP address (handle "localhost" -> "127.0.0.1")
+        const ip_address = if (std.mem.eql(u8, host, "localhost")) "127.0.0.1" else host;
+        const address = try std.net.Address.parseIp(ip_address, port);
+        const stream = std.net.tcpConnectToAddress(address) catch |err| {
+            std.log.debug("[L1Client] Failed to connect to {s}:{d} for {s}: {any}", .{ host, port, method, err });
+            return err;
+        };
         defer stream.close();
 
         // Build JSON-RPC request
@@ -465,18 +484,27 @@ pub const Client = struct {
         const request_body = try request_json.toOwnedSlice();
         defer self.allocator.free(request_body);
 
-        // Build HTTP request
+        // Build HTTP request - use same pattern as engine_api_client for consistency
         var http_request = std.ArrayList(u8).init(self.allocator);
         defer http_request.deinit();
 
-        try http_request.writer().print(
-            \\POST / HTTP/1.1\r
-            \\Host: {s}:{d}\r
-            \\Content-Type: application/json\r
-            \\Content-Length: {d}\r
-            \\\r
-            \\{s}
-        , .{ host, port, request_body.len, request_body });
+        // Request line
+        try http_request.writer().print("POST / HTTP/1.1\r\n", .{});
+
+        // Headers - write each line separately with explicit \r\n
+        try http_request.writer().print("Host: {s}:{d}\r\n", .{ host, port });
+        try http_request.writer().print("Content-Type: application/json\r\n", .{});
+        try http_request.writer().print("Content-Length: {d}\r\n", .{request_body.len});
+        try http_request.writer().print("Connection: close\r\n", .{});
+
+        // End of headers
+        try http_request.writer().print("\r\n", .{});
+
+        // Append request body directly
+        try http_request.writer().writeAll(request_body);
+
+        // Debug: log request for troubleshooting
+        std.log.debug("[L1Client] Sending HTTP request to {s}:{d} for {s}, Content-Length: {d}", .{ host, port, method, request_body.len });
 
         const http_request_bytes = try http_request.toOwnedSlice();
         defer self.allocator.free(http_request_bytes);
@@ -486,12 +514,69 @@ pub const Client = struct {
 
         // Read response
         var response_buffer: [8192]u8 = undefined;
-        const bytes_read = try stream.read(&response_buffer);
+        const bytes_read = stream.read(&response_buffer) catch |err| {
+            std.log.debug("[L1Client] Failed to read response from {s}:{d} for {s}: {any}", .{ host, port, method, err });
+            return err;
+        };
+
+        if (bytes_read == 0) {
+            return error.EmptyResponse;
+        }
+
         const response = response_buffer[0..bytes_read];
 
         // Parse HTTP response
-        const body_start = std.mem.indexOf(u8, response, "\r\n\r\n") orelse return error.InvalidResponse;
+        const body_start = std.mem.indexOf(u8, response, "\r\n\r\n") orelse {
+            std.log.err("[L1Client] Invalid HTTP response format from {s}:{d} for {s}, response: {s}", .{ host, port, method, response });
+            return error.InvalidResponse;
+        };
+
+        // Check HTTP status code
+        const status_line_end = std.mem.indexOf(u8, response, "\r\n") orelse {
+            std.log.err("[L1Client] Invalid HTTP response format from {s}:{d} for {s}", .{ host, port, method });
+            return error.InvalidResponse;
+        };
+        const status_line = response[0..status_line_end];
+        if (!std.mem.startsWith(u8, status_line, "HTTP/1.1 200") and !std.mem.startsWith(u8, status_line, "HTTP/1.0 200")) {
+            std.log.err("[L1Client] HTTP error response from {s}:{d} for {s}: {s}", .{ host, port, method, status_line });
+
+            // Log request details for debugging
+            const request_preview = if (http_request_bytes.len > 200) http_request_bytes[0..200] else http_request_bytes;
+            std.log.debug("[L1Client] HTTP request (first {d} bytes): {s}", .{ request_preview.len, request_preview });
+
+            // Try to extract error message from body
+            const json_body = response[body_start + 4 ..];
+            if (json_body.len > 0) {
+                std.log.debug("[L1Client] Error response body: {s}", .{json_body});
+                // Try to parse as JSON-RPC error response
+                const parsed_error = std.json.parseFromSliceLeaky(
+                    struct {
+                        @"error": ?struct {
+                            code: i32,
+                            message: []const u8,
+                        },
+                    },
+                    self.allocator,
+                    json_body,
+                    .{ .ignore_unknown_fields = true },
+                ) catch null;
+                if (parsed_error) |err| {
+                    if (err.@"error") |e| {
+                        std.log.err("[L1Client] JSON-RPC error: code={d}, message={s}", .{ e.code, e.message });
+                    }
+                }
+            }
+            // Log full response for debugging (truncate if too long)
+            const response_preview = if (response.len > 500) response[0..500] else response;
+            std.log.debug("[L1Client] Full HTTP response (first {d} bytes): {s}", .{ response_preview.len, response_preview });
+            return error.HttpError;
+        }
+
         const json_body = response[body_start + 4 ..];
+
+        if (json_body.len == 0) {
+            return error.EmptyResponse;
+        }
 
         // Return JSON body (caller will free)
         return try self.allocator.dupe(u8, json_body);

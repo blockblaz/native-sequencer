@@ -7,12 +7,13 @@ pub const Config = struct {
 
     // L1 Connection
     l1_rpc_url: []const u8 = "http://localhost:8545",
-    l1_chain_id: u64 = 1,
+    l1_chain_id: u64 = 61971,
 
     // L2 Connection
-    l2_rpc_url: []const u8 = "http://localhost:8545",
-    l2_engine_api_port: u16 = 8551,
-    l2_chain_id: u64 = 1337,
+    l2_rpc_url: []const u8 = "http://localhost:18545",
+    l2_engine_api_port: u16 = 18551,
+    l2_chain_id: u64 = 61972,
+    l2_jwt_secret: ?[32]u8 = null, // JWT secret for Engine API authentication (32 bytes)
 
     // Sequencer
     sequencer_private_key: ?[32]u8 = null,
@@ -51,13 +52,44 @@ pub const Config = struct {
             config.l1_rpc_url = url;
         } else |_| {}
 
+        if (std.process.getEnvVarOwned(allocator, "L1_CHAIN_ID")) |chain_id_str| {
+            defer allocator.free(chain_id_str);
+            config.l1_chain_id = try std.fmt.parseInt(u64, chain_id_str, 10);
+        } else |_| {}
+
         if (std.process.getEnvVarOwned(allocator, "L2_RPC_URL")) |url| {
             config.l2_rpc_url = url;
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "L2_CHAIN_ID")) |chain_id_str| {
+            defer allocator.free(chain_id_str);
+            config.l2_chain_id = try std.fmt.parseInt(u64, chain_id_str, 10);
         } else |_| {}
 
         if (std.process.getEnvVarOwned(allocator, "L2_ENGINE_API_PORT")) |port_str| {
             config.l2_engine_api_port = try std.fmt.parseInt(u16, port_str, 10);
             allocator.free(port_str);
+        } else |_| {}
+
+        if (std.process.getEnvVarOwned(allocator, "L2_JWT_SECRET")) |secret_hex| {
+            defer allocator.free(secret_hex);
+            // Parse hex secret (remove 0x prefix if present)
+            const hex_start: usize = if (std.mem.startsWith(u8, secret_hex, "0x")) 2 else 0;
+            const hex_data = secret_hex[hex_start..];
+
+            if (hex_data.len != 64) {
+                return error.InvalidJWTSecret;
+            }
+
+            var secret_bytes: [32]u8 = undefined;
+            var i: usize = 0;
+            while (i < 32) : (i += 1) {
+                const high = try std.fmt.parseInt(u8, hex_data[i * 2 .. i * 2 + 1], 16);
+                const low = try std.fmt.parseInt(u8, hex_data[i * 2 + 1 .. i * 2 + 2], 16);
+                secret_bytes[i] = (high << 4) | low;
+            }
+
+            config.l2_jwt_secret = secret_bytes;
         } else |_| {}
 
         if (std.process.getEnvVarOwned(allocator, "SEQUENCER_KEY")) |key_hex| {

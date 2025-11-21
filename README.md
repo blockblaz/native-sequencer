@@ -39,7 +39,7 @@ The native-sequencer follows an op-node style architecture, delegating execution
 │ native-sequencer │ (Consensus Layer)
 └────────┬─────────┘
          │ 1. Request block building
-         │    engine_forkchoiceUpdated(payload_attrs)
+         │    engine_forkchoiceUpdatedV3(payload_attrs)
          ▼
 ┌──────────────────┐
 │   L2 geth        │ (Execution Layer)
@@ -104,8 +104,8 @@ The native-sequencer follows an op-node style architecture, delegating execution
 - **`execute_tx_builder.zig`**: Builds ExecuteTx transactions with witness data for L1 submission
 
 #### L2 Integration (`src/l2/`)
-- **`engine_api_client.zig`**: Engine API client for requesting payloads from L2 geth
-- **`payload_attrs.zig`**: Payload attributes builder for `engine_forkchoiceUpdated`
+- **`engine_api_client.zig`**: Engine API client for requesting payloads from L2 geth with full field parsing (extraData, baseFeePerGas, withdrawals, blobGasUsed, excessBlobGas) and JWT authentication
+- **`payload_attrs.zig`**: Payload attributes builder for `engine_forkchoiceUpdatedV3`
 - **`state_provider.zig`**: State provider for querying L2 geth state (nonces, balances, code)
 
 #### Batch Management (`src/batch/`)
@@ -130,6 +130,7 @@ The native-sequencer follows an op-node style architecture, delegating execution
 - **`hash.zig`**: Cryptographic hashing (Keccak256)
 - **`secp256k1_wrapper.zig`**: ECDSA signature operations via libsecp256k1
 - **`signature.zig`**: Signature verification and address recovery
+- **`jwt.zig`**: JWT token generation for Engine API authentication (HMAC-SHA256)
 
 ### Architecture Characteristics
 
@@ -154,8 +155,13 @@ The native-sequencer follows an op-node style architecture, delegating execution
 ### Build Commands
 
 ```bash
-# Build the sequencer executable
+# Build the sequencer executable (native architecture)
 zig build
+
+# Build for specific target
+zig build -Dtarget=x86_64-linux-gnu.2.38    # Linux x86_64
+zig build -Dtarget=aarch64-macos           # macOS ARM64
+zig build -Dtarget=x86_64-windows          # Windows x86_64
 
 # Build and run
 zig build run
@@ -173,7 +179,17 @@ zig build fmt
 zig build lint-fix
 ```
 
-The build output will be in `zig-out/bin/sequencer`.
+The build output will be in `zig-out/bin/sequencer` (or `sequencer.exe` on Windows).
+
+### Cross-Compilation Support
+
+The sequencer supports cross-compilation to multiple platforms:
+
+- **macOS**: Native ARM64 builds supported. x86_64 cross-compilation from ARM64 may require architecture-matched libraries.
+- **Windows**: Cross-compilation supported (LMDB disabled, uses in-memory state).
+- **Linux**: Cross-compilation requires proper setup with cross-compilation toolchains and libraries.
+
+**Note**: LMDB linking is automatically handled based on the target platform. Windows builds use in-memory state instead of LMDB persistence.
 
 ### Docker Build
 
@@ -248,8 +264,8 @@ zig build run
 Configure the sequencer using environment variables. Key variables:
 
 - **API**: `API_HOST`, `API_PORT` (default: `0.0.0.0:6197`)
-- **L1**: `L1_RPC_URL`, `L1_CHAIN_ID`, `SEQUENCER_KEY`
-- **L2**: `L2_RPC_URL`, `L2_ENGINE_API_PORT` (default: `http://localhost:8545:8551`)
+- **L1**: `L1_RPC_URL`, `L1_CHAIN_ID` (default: `61971`), `SEQUENCER_KEY`
+- **L2**: `L2_RPC_URL` (default: `http://localhost:18545`), `L2_ENGINE_API_PORT` (default: `18551`), `L2_CHAIN_ID` (default: `61972`), `L2_JWT_SECRET` (hex-encoded 32-byte secret for Engine API authentication)
 - **Mempool**: `MEMPOOL_MAX_SIZE`, `MEMPOOL_WAL_PATH`
 - **Batch**: `BATCH_SIZE_LIMIT`, `BATCH_INTERVAL_MS`, `BLOCK_GAS_LIMIT`
 - **State**: `STATE_DB_PATH`
@@ -711,6 +727,9 @@ This is experimental software. Core features are implemented:
 - ✅ Batch formation and L1 submission via ExecuteTx
 - ✅ LMDB persistence
 - ✅ Witness generation for stateless execution
+- ✅ Engine API full compatibility (parses all fields: extraData, baseFeePerGas, withdrawals, blobGasUsed, excessBlobGas)
+- ✅ JWT authentication for Engine API
+- ✅ Cross-platform builds (macOS ARM64, Windows x86_64, Linux x86_64)
 - ⏳ L1 subscription monitoring (WebSocket support)
 - ⏳ Comprehensive testing
 
@@ -753,6 +772,39 @@ The sequencer supports ExecuteTx transactions (type 0x05) for stateless executio
 - **Not Mempooled**: Not stored in sequencer's mempool
 
 ExecuteTx includes pre-state hash, witness data, withdrawals, and standard EIP-1559 fields. See `src/core/transaction_execute.zig` for implementation details.
+
+### Engine API Compatibility
+
+The sequencer's Engine API client (`src/l2/engine_api_client.zig`) provides full compatibility with geth's Engine API:
+
+- **Full Field Parsing**: Parses all fields returned by geth, including:
+  - `extraData`: Block extra data
+  - `baseFeePerGas`: Base fee per gas (EIP-1559)
+  - `withdrawals`: Validator withdrawals array (Shanghai/Cancun upgrade)
+  - `blobGasUsed`: Blob gas used (Cancun upgrade)
+  - `excessBlobGas`: Excess blob gas (Cancun upgrade)
+- **JWT Authentication**: Supports JWT token authentication for Engine API endpoints (configured via `L2_JWT_SECRET`)
+- **Backward Compatibility**: Handles optional fields gracefully (null values for pre-upgrade blocks)
+- **Memory Management**: Proper cleanup of all parsed data structures
+
+### JWT Authentication
+
+The sequencer supports JWT authentication for Engine API communication with L2 geth. Configure the JWT secret using the `L2_JWT_SECRET` environment variable:
+
+```bash
+# Generate a random 32-byte hex secret
+openssl rand -hex 32
+
+# Set in environment
+export L2_JWT_SECRET=0x<generated_secret>
+
+# Or pass directly to the sequencer
+L2_JWT_SECRET=0x<generated_secret> ./zig-out/bin/sequencer
+```
+
+**Important**: The same JWT secret must be configured in both the sequencer and L2 geth. See your L2 geth documentation for JWT configuration.
+
+**Note**: If `L2_JWT_SECRET` is not provided, the sequencer will attempt Engine API calls without authentication. This may fail if L2 geth requires JWT authentication.
 
 ## Known Issues & Workarounds
 
