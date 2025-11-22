@@ -24,6 +24,8 @@ pub const SequencerError = error{
     L1ConnectionFailed,
     L1SubmissionFailed,
     L1TransactionReverted,
+    JsonRpcError,
+    InvalidJsonRpcVersion,
 
     // State errors
     StateCorruption,

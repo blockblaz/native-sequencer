@@ -130,13 +130,34 @@ pub const Client = struct {
         const result = try self.callRpc("eth_getTransactionCount", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse result
+        // Parse full JSON-RPC response
         const parsed = try std.json.parseFromSliceLeaky(
-            struct { result: []const u8 },
+            struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
+                result: []const u8,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
+            },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         );
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_getTransactionCount error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         // Convert hex string to u64
         const hex_str = parsed.result;
@@ -204,13 +225,34 @@ pub const Client = struct {
         const result = try self.callRpc("eth_sendRawTransaction", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse result - should be transaction hash
+        // Parse full JSON-RPC response
         const parsed = try std.json.parseFromSliceLeaky(
-            struct { result: []const u8 },
+            struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
+                result: []const u8,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
+            },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         );
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_sendRawTransaction error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         // Convert hex string to Hash
         const hash_str = parsed.result;
@@ -256,13 +298,34 @@ pub const Client = struct {
         const result = try self.callRpc("eth_sendRawTransactionConditional", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse result - should be transaction hash
+        // Parse full JSON-RPC response
         const parsed = try std.json.parseFromSliceLeaky(
-            struct { result: []const u8 },
+            struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
+                result: []const u8,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
+            },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         );
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_sendRawTransactionConditional error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         // Convert hex string to Hash
         const hash_str = parsed.result;
@@ -316,16 +379,37 @@ pub const Client = struct {
             return error.EmptyResponse;
         }
 
-        // Parse result - should be hex string
+        // Parse full JSON-RPC response
         const parsed = std.json.parseFromSliceLeaky(
-            struct { result: []const u8 },
+            struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
+                result: []const u8,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
+            },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         ) catch |err| {
             std.log.err("[L1Client] Failed to parse eth_blockNumber response: {any}, response: {s}", .{ err, result });
             return error.UnexpectedToken;
         };
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_blockNumber error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         // Convert hex string to u64
         const hex_str = parsed.result;
@@ -362,9 +446,11 @@ pub const Client = struct {
         const result = try self.callRpc("eth_getBlockByNumber", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse result
+        // Parse full JSON-RPC response
         const parsed = try std.json.parseFromSliceLeaky(
             struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
                 result: struct {
                     number: []const u8,
                     hash: []const u8,
@@ -372,11 +458,28 @@ pub const Client = struct {
                     timestamp: []const u8,
                     transactions: []struct { to: ?[]const u8, input: []const u8 },
                 },
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
             },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         );
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_getBlockByNumber error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         const hex_start: usize = if (std.mem.startsWith(u8, parsed.result.number, "0x")) 2 else 0;
         const number = try std.fmt.parseInt(u64, parsed.result.number[hex_start..], 16);
@@ -439,13 +542,34 @@ pub const Client = struct {
         const result = try self.callRpc("eth_getTransactionReceipt", std.json.Value{ .array = params });
         defer self.allocator.free(result);
 
-        // Parse result
+        // Parse full JSON-RPC response
         const parsed = try std.json.parseFromSliceLeaky(
-            struct { result: ?struct { blockNumber: []const u8 } },
+            struct {
+                jsonrpc: []const u8,
+                id: std.json.Value,
+                result: ?struct { blockNumber: []const u8 },
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                    data: ?std.json.Value = null,
+                } = null,
+            },
             self.allocator,
             result,
-            .{},
+            .{ .ignore_unknown_fields = true },
         );
+
+        // Check for error response
+        if (parsed.@"error") |err| {
+            std.log.err("[L1Client] eth_getTransactionReceipt error: code={d}, message={s}", .{ err.code, err.message });
+            return error.JsonRpcError;
+        }
+
+        // Validate jsonrpc version
+        if (!std.mem.eql(u8, parsed.jsonrpc, "2.0")) {
+            std.log.err("[L1Client] Invalid jsonrpc version: {s}", .{parsed.jsonrpc});
+            return error.InvalidJsonRpcVersion;
+        }
 
         if (parsed.result) |rec| {
             const hex_start: usize = if (std.mem.startsWith(u8, rec.blockNumber, "0x")) 2 else 0;
